@@ -22,6 +22,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   FileCheck2,
   FileJson,
   FilePlus2,
@@ -30,6 +31,8 @@ import {
   Info,
   KeyRound,
   Link2,
+  LogIn,
+  LogOut,
   LoaderCircle,
   LockKeyhole,
   MapPin,
@@ -46,11 +49,13 @@ import {
   Terminal,
   UploadCloud,
   UserCheck,
+  UserRound,
   Users,
   X,
   Zap,
 } from 'lucide-react';
-import { api } from './lib/api';
+import { api, isApiUnavailable, setAuthInvalidatedHandler } from './lib/api';
+import { clearAuthSession, hasPermission, permissionsFor, readAuthSession, roles, saveAuthSession } from './lib/auth';
 import { AppShell } from './components/Shell';
 import {
   EmptyState,
@@ -59,6 +64,7 @@ import {
   IntegrityMeter,
   LoadingSkeleton,
   Modal,
+  OfficialSeal,
   PageHeader,
   RiskBadge,
   SectionEyebrow,
@@ -246,16 +252,42 @@ function officerStatsFromDocuments(documents) {
   }));
 }
 
+const authProfiles = [
+  { role: roles.investigatingOfficer, username: 'investigator', password: 'demo-investigator-2026', description: 'Seal evidence and manage assigned custody.' },
+  { role: roles.forensicAnalyst, username: 'analyst', password: 'demo-analyst-2026', description: 'Verify integrity and prepare reports.' },
+  { role: roles.seniorAuthority, username: 'authority', password: 'demo-authority-2026', description: 'Review incidents and run controlled demos.' },
+  { role: roles.courtViewer, username: 'court', password: 'demo-court-2026', description: 'Read-only verification and court review.' },
+  { role: roles.systemAdmin, username: 'admin', password: 'demo-admin-2026', description: 'Manage authorised users and devices.' },
+];
+
+const permissionLabels = {
+  upload: 'seal new evidence',
+  verify: 'verify cryptographic integrity',
+  action: 'append custody actions',
+  transfer: 'transfer custody',
+  tamper: 'run the controlled tamper demonstration',
+  report: 'generate forensic reports',
+  incidents: 'review security incidents',
+  admin: 'manage system administration',
+};
+
 function App() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('sakshya-theme') || 'light');
   const [highContrast, setHighContrast] = useState(() => window.localStorage.getItem('sakshya-contrast') === 'true');
+  const [session, setSession] = useState(() => readAuthSession());
+  const [authStatus, setAuthStatus] = useState('checking');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [backendStatus, setBackendStatus] = useState('checking');
+  const [backendError, setBackendError] = useState('');
   const [documents, setDocuments] = useState([]);
-  const [apiOnline, setApiOnline] = useState(false);
   const [lastSync, setLastSync] = useState(null);
-  const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(true);
   const [completedReports, setCompletedReports] = useState([]);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [authProbe, setAuthProbe] = useState(0);
+  const permissions = permissionsFor(session?.user?.role);
+  const apiOnline = backendStatus === 'online' && authStatus === 'signed-in';
 
   useEffect(() => {
     window.localStorage.setItem('sakshya-theme', theme);
@@ -265,7 +297,90 @@ function App() {
     window.localStorage.setItem('sakshya-contrast', String(highContrast));
   }, [highContrast]);
 
+  useEffect(() => setAuthInvalidatedHandler(() => {
+    clearAuthSession();
+    setSession(null);
+    setDocuments([]);
+    setAuthStatus('sign-in-required');
+    setAuthError('Your backend session has expired or is no longer valid. Sign in again.');
+    setBackendStatus('online');
+    setBackendError('');
+    setLoading(false);
+  }), []);
+
   useEffect(() => {
+    let active = true;
+    async function establishSession() {
+      setAuthStatus('checking');
+      setBackendStatus('checking');
+      setLoading(Boolean(readAuthSession()?.token));
+
+      try {
+        const health = await api.getHealth();
+        if (!active) return;
+        setBackendStatus(health?.ok === false ? 'offline' : 'online');
+        setBackendError(health?.ok === false ? 'The SAKSHYA backend reported an unhealthy state.' : '');
+      } catch (error) {
+        if (active) {
+          setBackendStatus('offline');
+          setBackendError(error.message || 'The SAKSHYA backend could not be reached.');
+          setAuthStatus(session?.token ? 'offline' : 'sign-in-required');
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (!active) return;
+      const stored = readAuthSession();
+      if (!stored?.token) {
+        setSession(null);
+        setAuthStatus('sign-in-required');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const remote = await api.getCurrentUser();
+        const currentUser = remote?.user || remote;
+        if (!currentUser?.role) throw new Error('The authentication service returned no officer profile.');
+        const next = { ...stored, user: currentUser };
+        saveAuthSession(next);
+        if (active) {
+          setSession(next);
+          setAuthStatus('signed-in');
+          setAuthError('');
+        }
+      } catch (error) {
+        if (active) {
+          if (isApiUnavailable(error)) {
+            setBackendStatus('offline');
+            setBackendError(error.message || 'The backend could not validate the saved session.');
+            setAuthStatus('offline');
+          } else {
+            clearAuthSession();
+            setSession(null);
+            setAuthStatus('sign-in-required');
+            setAuthError(error.status === 401
+              ? 'Your previous backend session is no longer valid. Sign in again.'
+              : error.message || 'The saved session could not be validated.');
+          }
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    establishSession();
+    return () => { active = false; };
+  }, [authProbe, session?.token]);
+
+  useEffect(() => {
+    if (authStatus !== 'signed-in' || !session?.token) {
+      setDocuments([]);
+      setLoading(false);
+      return undefined;
+    }
+
     let active = true;
     async function sync() {
       try {
@@ -275,34 +390,94 @@ function App() {
         const mapped = Array.isArray(list) ? list.map(normalizeDocument).filter(Boolean) : [];
         if (active) {
           setDocuments(mapped);
-          setApiOnline(health?.ok !== false);
+          setBackendStatus(health?.ok === false ? 'offline' : 'online');
+          setBackendError(health?.ok === false ? 'The SAKSHYA backend reported an unhealthy state.' : '');
           setLastSync(new Date());
-          setApiError('');
           setLoading(false);
         }
       } catch (error) {
-        // Keep only the last real snapshot, but make the disconnected state explicit.
-        if (active) {
-          setApiOnline(false);
-          setApiError(error.message || 'The evidence API could not be reached.');
-          setLoading(false);
+        if (!active) return;
+        if (isApiUnavailable(error)) {
+          setBackendStatus('offline');
+          setBackendError(error.message || 'The evidence API could not be reached.');
+        } else {
+          setBackendStatus('online');
+          setBackendError('');
         }
+        setLoading(false);
       }
     }
+
+    setLoading(true);
     sync();
     const interval = window.setInterval(sync, 5000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [refreshToken]);
+  }, [authStatus, session?.token, refreshToken]);
+
+  function markBackendSuccess() {
+    setBackendStatus('online');
+    setBackendError('');
+    setLastSync(new Date());
+  }
+
+  function markBackendFailure(error) {
+    if (isApiUnavailable(error)) {
+      setBackendStatus('offline');
+      setBackendError(error.message || 'The evidence API could not be reached.');
+    }
+  }
+
+  async function signIn(credentials) {
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const result = await api.login(credentials);
+      const next = saveAuthSession(result);
+      setSession(next);
+      setDocuments([]);
+      setBackendStatus('online');
+      setBackendError('');
+      setAuthStatus('checking');
+      toast.success('Backend session issued. Validating officer profile…');
+    } catch (error) {
+      if (isApiUnavailable(error)) {
+        setBackendStatus('offline');
+        setBackendError(error.message || 'The SAKSHYA backend could not be reached.');
+      } else {
+        setBackendStatus('online');
+        setAuthError(error.message || 'Sign-in was not accepted by the backend.');
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function signOut() {
+    api.logout();
+    clearAuthSession();
+    setSession(null);
+    setDocuments([]);
+    setLastSync(null);
+    setAuthError('');
+    setBackendError('');
+    setAuthStatus('checking');
+    setBackendStatus('checking');
+    setLoading(true);
+    setAuthProbe((value) => value + 1);
+  }
 
   async function uploadDocument(payload) {
-    const remote = await api.uploadDocument(payload);
-    const created = normalizeDocument(remote);
-    if (!created) throw new Error('The evidence API returned an unreadable record.');
-    setDocuments((current) => [created, ...current]);
-    setApiOnline(true);
-    setLastSync(new Date());
-    setApiError('');
-    return created;
+    try {
+      const remote = await api.uploadDocument(payload);
+      const created = normalizeDocument(remote);
+      if (!created) throw new Error('The evidence API returned an unreadable record.');
+      setDocuments((current) => [created, ...current]);
+      markBackendSuccess();
+      return created;
+    } catch (error) {
+      markBackendFailure(error);
+      throw error;
+    }
   }
 
   async function addAction(docId, actionData) {
@@ -313,18 +488,48 @@ function App() {
       const updated = normalizeDocument(remote);
       if (!updated) throw new Error('The evidence API returned an unreadable chain.');
       setDocuments((currentDocuments) => currentDocuments.map((document) => document.docId === docId ? updated : document));
-      setApiOnline(true);
-      setLastSync(new Date());
-      setApiError('');
+      markBackendSuccess();
       return updated;
     } catch (error) {
-      // A rejected transfer still returns the refreshed record with the
-      // persisted security incident. Surface it immediately in the UI.
       const incidentRecord = normalizeDocument(error.payload?.evidence);
       if (incidentRecord) {
         setDocuments((currentDocuments) => currentDocuments.map((document) => document.docId === docId ? incidentRecord : document));
-        setApiOnline(true);
+        setBackendStatus('online');
         setLastSync(new Date());
+      } else {
+        markBackendFailure(error);
+      }
+      throw error;
+    }
+  }
+
+  async function requestTransferOtp(evidenceId, recipient) {
+    try {
+      const result = await api.requestTransferOtp(evidenceId, recipient);
+      markBackendSuccess();
+      return result;
+    } catch (error) {
+      markBackendFailure(error);
+      throw error;
+    }
+  }
+
+  async function completeTransfer(evidenceId, recipient, otp) {
+    try {
+      const remote = await api.transferEvidence(evidenceId, { recipient, otp });
+      const updated = normalizeDocument(remote);
+      if (!updated) throw new Error('The evidence API returned an unreadable custody record.');
+      setDocuments((currentDocuments) => currentDocuments.map((document) => document.docId === evidenceId ? updated : document));
+      markBackendSuccess();
+      return updated;
+    } catch (error) {
+      const incidentRecord = normalizeDocument(error.payload?.evidence);
+      if (incidentRecord) {
+        setDocuments((currentDocuments) => currentDocuments.map((document) => document.docId === evidenceId ? incidentRecord : document));
+        setBackendStatus('online');
+        setLastSync(new Date());
+      } else {
+        markBackendFailure(error);
       }
       throw error;
     }
@@ -333,42 +538,37 @@ function App() {
   async function verifyDocument(docId) {
     const document = documents.find((item) => item.docId === docId);
     if (!document) return { valid: false, details: 'Document not found.' };
-    const remote = await api.verifyChain(docId);
-    const updated = normalizeDocument(remote);
-    const result = {
-      valid: typeof remote.valid === 'boolean' ? remote.valid : updated?.valid === true,
-      brokenAtIndex: Number.isInteger(remote.brokenAtIndex) ? remote.brokenAtIndex : null,
-      details: remote.details || remote.message || 'Verification completed by the SAKSHYA backend.',
-    };
-    if (updated) setDocuments((current) => current.map((item) => item.docId === docId ? updated : item));
-    setApiOnline(true);
-    setLastSync(new Date());
-    setApiError('');
-    return result;
+    try {
+      const remote = await api.verifyChain(docId);
+      const updated = normalizeDocument(remote);
+      const result = {
+        valid: typeof remote?.valid === 'boolean' ? remote.valid : updated?.valid === true,
+        brokenAtIndex: Number.isInteger(remote?.brokenAtIndex) ? remote.brokenAtIndex : null,
+        details: remote?.details || remote?.message || 'Verification completed by the SAKSHYA backend.',
+      };
+      if (updated) setDocuments((current) => current.map((item) => item.docId === docId ? updated : item));
+      markBackendSuccess();
+      return result;
+    } catch (error) {
+      markBackendFailure(error);
+      throw error;
+    }
   }
 
   async function tamperDocument(docId, blockIndex, fakeData) {
     const document = documents.find((item) => item.docId === docId);
     if (!document) throw new Error('Document not found.');
-    const remote = await api.simulateTamper(docId, blockIndex, fakeData);
-    const updated = normalizeDocument(remote);
-    if (!updated) throw new Error('The evidence API returned an unreadable chain.');
-    setDocuments((current) => current.map((item) => item.docId === docId ? updated : item));
-    setApiOnline(true);
-    setLastSync(new Date());
-    setApiError('');
-    return updated;
-  }
-
-  async function restoreDocument(docId, baseline) {
-    const remote = await api.resetTamper(docId);
-    const updated = normalizeDocument(remote);
-    if (!updated) throw new Error('The evidence API returned an unreadable restored record.');
-    setDocuments((current) => current.map((item) => item.docId === docId ? updated : item));
-    setApiOnline(true);
-    setLastSync(new Date());
-    setApiError('');
-    return updated;
+    try {
+      const remote = await api.simulateTamper(docId, blockIndex, fakeData);
+      const updated = normalizeDocument(remote);
+      if (!updated) throw new Error('The evidence API returned an unreadable chain.');
+      setDocuments((current) => current.map((item) => item.docId === docId ? updated : item));
+      markBackendSuccess();
+      return updated;
+    } catch (error) {
+      markBackendFailure(error);
+      throw error;
+    }
   }
 
   function markReportGenerated(docId) {
@@ -376,24 +576,134 @@ function App() {
     setCompletedReports((current) => current.includes(docId) ? current : [...current, docId]);
   }
 
-  return <Router><Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} /><AppErrorBoundary><AppShell theme={theme} onThemeChange={setTheme} highContrast={highContrast} onContrastChange={() => setHighContrast((value) => !value)} apiOnline={apiOnline} apiError={apiError} lastSync={lastSync} documents={documents}><Routes><Route path="/" element={<LandingPage documents={documents} apiOnline={apiOnline} />} /><Route path="/dashboard" element={<DashboardPage documents={documents} onRefresh={() => setRefreshToken((value) => value + 1)} lastSync={lastSync} loading={loading} apiOnline={apiOnline} apiError={apiError} />} /><Route path="/document/:docId" element={<DocumentDetailPage documents={documents} onAddAction={addAction} onVerify={verifyDocument} onTamper={tamperDocument} />} /><Route path="/upload" element={<UploadPage onUpload={uploadDocument} apiOnline={apiOnline} apiError={apiError} />} /><Route path="/verify" element={<VerifyPage documents={documents} onVerify={verifyDocument} apiOnline={apiOnline} apiError={apiError} />} /><Route path="/demo" element={<DemoPage documents={documents} onTamper={tamperDocument} onRestore={restoreDocument} onVerify={verifyDocument} reportIds={completedReports} />} /><Route path="/transfer" element={<TransferPage documents={documents} onAddAction={addAction} apiOnline={apiOnline} apiError={apiError} />} /><Route path="/anomalies" element={<AnomaliesPage documents={documents} />} /><Route path="/reports" element={<ReportsPage documents={documents} onReportGenerated={markReportGenerated} apiOnline={apiOnline} apiError={apiError} />} /><Route path="/admin" element={<AdminPage documents={documents} apiOnline={apiOnline} apiError={apiError} />} /><Route path="*" element={<NotFoundPage />} /></Routes></AppShell></AppErrorBoundary></Router>;
+  const workspace = authStatus === 'signed-in' && session?.user ? (
+    <AppShell
+      theme={theme}
+      onThemeChange={setTheme}
+      highContrast={highContrast}
+      onContrastChange={() => setHighContrast((value) => !value)}
+      apiOnline={apiOnline}
+      apiError={backendError}
+      lastSync={lastSync}
+      documents={documents}
+      user={session.user}
+      permissions={permissions}
+      onLogout={signOut}
+    >
+      <Routes>
+        <Route path="/" element={<LandingPage documents={documents} apiOnline={apiOnline} permissions={permissions} />} />
+        <Route path="/dashboard" element={<DashboardPage documents={documents} onRefresh={() => setRefreshToken((value) => value + 1)} lastSync={lastSync} loading={loading} apiOnline={apiOnline} apiError={backendError} permissions={permissions} />} />
+        <Route path="/document/:docId" element={<DocumentDetailPage documents={documents} onAddAction={addAction} onVerify={verifyDocument} onTamper={tamperDocument} permissions={permissions} user={session.user} />} />
+        <Route path="/upload" element={<RoleGate user={session.user} permission="upload"><UploadPage onUpload={uploadDocument} apiOnline={apiOnline} apiError={backendError} user={session.user} /></RoleGate>} />
+        <Route path="/verify" element={<RoleGate user={session.user} permission="verify"><VerifyPage documents={documents} onVerify={verifyDocument} apiOnline={apiOnline} apiError={backendError} permissions={permissions} /></RoleGate>} />
+        <Route path="/demo" element={<RoleGate user={session.user} permission="tamper"><DemoPage documents={documents} onTamper={tamperDocument} onVerify={verifyDocument} reportIds={completedReports} canVerify={Boolean(permissions.verify)} canUpload={Boolean(permissions.upload)} /></RoleGate>} />
+        <Route path="/transfer" element={<RoleGate user={session.user} permission="transfer"><TransferPage documents={documents} onRequestTransferOtp={requestTransferOtp} onTransfer={completeTransfer} apiOnline={apiOnline} permissions={permissions} /></RoleGate>} />
+        <Route path="/anomalies" element={<RoleGate user={session.user} permission="incidents"><AnomaliesPage documents={documents} /></RoleGate>} />
+        <Route path="/reports" element={<RoleGate user={session.user} permission="report"><ReportsPage documents={documents} onReportGenerated={markReportGenerated} apiOnline={apiOnline} apiError={backendError} /></RoleGate>} />
+        <Route path="/admin" element={<RoleGate user={session.user} permission="admin"><AdminPage documents={documents} apiOnline={apiOnline} apiError={backendError} /></RoleGate>} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </AppShell>
+  ) : null;
+
+  return (
+    <Router>
+      <Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} />
+      <AppErrorBoundary>
+        {authStatus === 'checking' ? <AuthLoadingScreen backendStatus={backendStatus} /> : workspace || <LoginPage backendStatus={backendStatus} backendError={backendError} error={authError} busy={authBusy} onLogin={signIn} onRetry={() => { setAuthError(''); setAuthProbe((value) => value + 1); }} />}
+      </AppErrorBoundary>
+    </Router>
+  );
 }
 
-function LandingPage({ documents, apiOnline }) {
+function AuthLoadingScreen({ backendStatus }) {
+  const status = backendStatus === 'offline' ? 'offline' : 'pending';
+  const label = backendStatus === 'offline' ? 'Backend offline' : 'Checking secure backend session';
+  return <main className="auth-loading"><div className="auth-loading__mark"><OfficialSeal /></div><SectionEyebrow icon={LockKeyhole}>SAKSHYA SECURE ACCESS</SectionEyebrow><h1>Establishing a trusted session</h1><p>Checking the live evidence node and validating your backend-issued officer session.</p><StatusBadge status={status} label={label} pulse={backendStatus === 'checking'} /></main>;
+}
+
+function LoginPage({ backendStatus, backendError, error, busy, onLogin, onRetry }) {
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState('');
+  const backendOnline = backendStatus === 'online';
+  const statusLabel = backendStatus === 'online'
+    ? 'Backend online · sign-in required'
+    : backendStatus === 'offline'
+      ? 'Backend offline'
+      : 'Connecting to SAKSHYA backend…';
+
+  function chooseProfile(profile) {
+    setSelectedProfile(profile.username);
+    setCredentials({ username: profile.username, password: profile.password });
+    setShowPassword(false);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!credentials.username.trim() || !credentials.password) return;
+    await onLogin({ username: credentials.username.trim(), password: credentials.password });
+  }
+
+  return <main className="auth-screen">
+    <section className="auth-brand-panel">
+      <div className="auth-brand-panel__top"><OfficialSeal /><span>Government of India<br /><strong>Ministry of Home Affairs</strong></span></div>
+      <div className="auth-brand-panel__copy"><SectionEyebrow icon={Fingerprint}>NATIONAL EVIDENCE GRID</SectionEyebrow><h1>SAKSHYA</h1><p>Digital Evidence Integrity Platform</p><div className="auth-rule" /><h2>Custody you can prove.</h2><span>Every upload, handover and verification is recorded as a cryptographically linked event for authorised review.</span></div>
+      <div className="auth-brand-panel__facts"><span><ShieldCheck size={15} /> SHA-256 evidence sealing</span><span><LockKeyhole size={15} /> Role-bound access controls</span><span><BadgeCheck size={15} /> Court-ready audit records</span></div>
+      <div className="auth-brand-panel__footer"><span>SIH26190 · Smart India Hackathon 2026</span><span>Restricted system · Prototype environment</span></div>
+    </section>
+    <section className="auth-form-panel">
+      <div className="auth-form-panel__inner">
+        <div className="auth-status-row"><span className={cn('auth-status-dot', 'auth-status-dot--' + backendStatus)} /><strong>{statusLabel}</strong>{!backendOnline && <button className="text-button" type="button" onClick={onRetry}><RefreshCw size={14} />Retry</button>}</div>
+        <div className="auth-form-header"><SectionEyebrow icon={UserRound}>AUTHORISED OPERATOR ACCESS</SectionEyebrow><h2>Sign in to command centre</h2><p>Use an account issued by the SAKSHYA backend. Your password is never stored in this browser.</p></div>
+        {(error || backendError) && <div className="auth-error" role="alert"><ShieldAlert size={17} /><div><strong>{error ? 'Sign-in not accepted' : 'Evidence node unavailable'}</strong><span>{error || backendError}</span></div></div>}
+        <form className="auth-form" onSubmit={submit}>
+          <label className="form-field"><span>Username<i>*</i></span><div className="auth-input-wrap"><UserRound size={16} /><input autoComplete="username" value={credentials.username} onChange={(event) => { setSelectedProfile(''); setCredentials({ ...credentials, username: event.target.value }); }} placeholder="Enter authorised username" required /></div></label>
+          <label className="form-field"><span>Password<i>*</i></span><div className="auth-input-wrap"><LockKeyhole size={16} /><input autoComplete="current-password" type={showPassword ? 'text' : 'password'} value={credentials.password} onChange={(event) => { setSelectedProfile(''); setCredentials({ ...credentials, password: event.target.value }); }} placeholder="Enter backend password" required /><button type="button" className="auth-password-toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+          <button className="button button--primary button--full auth-submit" type="submit" disabled={busy || !backendOnline}>{busy ? <LoaderCircle size={17} className="spin" /> : <LogIn size={17} />}{busy ? 'Authenticating…' : backendOnline ? 'Sign in securely' : 'Waiting for backend'}</button>
+        </form>
+        <div className="auth-divider"><span>DEMO ACCESS PROFILES</span></div>
+        <div className="auth-profiles">{authProfiles.map((profile) => <button className={cn('auth-profile', selectedProfile === profile.username && 'auth-profile--selected')} type="button" key={profile.username} onClick={() => chooseProfile(profile)}><span className="auth-profile__icon"><UserCheck size={15} /></span><span><strong>{profile.role}</strong><small>{profile.description}</small></span><code>{profile.username}</code></button>)}</div>
+        <p className="auth-footnote"><LockKeyhole size={13} /> Session token is signed by the backend and expires after eight hours. Demo passwords are for the local prototype only.</p>
+      </div>
+    </section>
+  </main>;
+}
+
+function RoleGate({ user, permission, children }) {
+  if (hasPermission(user, permission)) return children;
+  return <PermissionDenied permission={permission} />;
+}
+
+function PermissionDenied({ permission }) {
+  return <section className="permission-page" role="alert"><div className="permission-page__icon"><ShieldAlert size={25} /></div><SectionEyebrow icon={LockKeyhole}>ROLE-BOUND ACTION</SectionEyebrow><h1>You do not have permission</h1><p>Your current backend role is not authorised to {permissionLabels[permission] || 'use this area'}. Sign in with an approved role or ask a Senior Authority to review access.</p><div className="permission-page__meta"><span>Backend policy response</span><strong>403 · access denied</strong></div></section>;
+}
+
+function actionErrorMessage(error, fallback) {
+  if (error?.status === 403) return 'You do not have permission to perform this action with the current backend role.';
+  return error?.message || fallback;
+}
+
+function BackendActionError({ message }) {
+  if (!message) return null;
+  return <div className="backend-action-error" role="alert"><ShieldAlert size={17} /><div><strong>{message.includes('permission') ? 'Role policy blocked this action' : 'Action could not be completed'}</strong><span>{message}</span></div></div>;
+}
+
+function LandingPage({ documents, apiOnline, permissions = {} }) {
   const valid = documents.filter((document) => document.status === 'valid').length;
   const compromised = documents.filter((document) => document.status === 'compromised').length;
   const leadDocument = documents[0];
   const leadStatus = !apiOnline ? 'offline' : leadDocument?.status === 'compromised' ? 'compromised' : leadDocument?.status === 'valid' ? 'verified' : 'pending';
-  const leadLink = leadDocument ? `/document/${encodeURIComponent(leadDocument.docId)}` : '/upload';
+  const leadLink = leadDocument ? `/document/${encodeURIComponent(leadDocument.docId)}` : permissions.upload ? '/upload' : '/dashboard';
   return <div className="landing-page">
     <motion.section className="landing-hero" {...motionProps(0.03)}>
-      <div className="landing-hero__copy"><div className="hero-official"><span className="hero-official__line" /><span>Government of India · Ministry of Home Affairs</span></div><h1>Custody you can <span>prove.</span></h1><p className="landing-hero__lead">SAKSHYA is a secure digital evidence and document custody grid that turns every handover, review and court access into a verifiable chain of record.</p><div className="hero-actions"><Link to="/dashboard" className="button button--primary">Open command centre <ArrowRight size={16} /></Link><Link to="/demo" className="button button--ghost">See the tamper demo <Network size={16} /></Link></div><div className="hero-trust"><span><ShieldCheck size={14} /> SHA-256 linked records</span><span><LockKeyhole size={14} /> Restricted access control</span><span><BadgeCheck size={14} /> Court-ready audit trail</span></div></div>
+      <div className="landing-hero__copy"><div className="hero-official"><span className="hero-official__line" /><span>Government of India · Ministry of Home Affairs</span></div><h1>Custody you can <span>prove.</span></h1><p className="landing-hero__lead">SAKSHYA is a secure digital evidence and document custody grid that turns every handover, review and court access into a verifiable chain of record.</p><div className="hero-actions"><Link to="/dashboard" className="button button--primary">Open command centre <ArrowRight size={16} /></Link>{permissions.tamper && <Link to="/demo" className="button button--ghost">See the tamper demo <Network size={16} /></Link>}</div><div className="hero-trust"><span><ShieldCheck size={14} /> SHA-256 linked records</span><span><LockKeyhole size={14} /> Restricted access control</span><span><BadgeCheck size={14} /> Court-ready audit trail</span></div></div>
       <div className="landing-hero__visual"><div className="hero-grid-lines" /><div className="hero-orbit hero-orbit--one" /><div className="hero-orbit hero-orbit--two" /><div className="hero-node hero-node--main"><div className="hero-node__top"><span className="hero-node__signal"><span /> LIVE INTEGRITY ENGINE</span><Fingerprint size={24} /></div><strong>{leadDocument ? <>Evidence<br />remains intact.</> : <>Awaiting<br />live evidence.</>}</strong><div className="hero-node__footer"><span>chain state</span><StatusBadge status={leadStatus} label={leadDocument ? (apiOnline ? leadStatus.toUpperCase() : 'OFFLINE SNAPSHOT') : 'AWAITING API'} pulse={leadStatus === 'verified'} /></div></div><div className="hero-mini-node hero-mini-node--a"><span>{leadDocument ? `BLOCK ${String(Math.max(leadDocument.chain.length - 1, 0)).padStart(2, '0')}` : 'NO BLOCK'}</span><code>{shortHash(leadDocument?.chain?.at(-1)?.hash)}</code></div><div className="hero-mini-node hero-mini-node--b"><span>HASH LINK</span><Link2 size={15} /></div><div className="hero-connector hero-connector--a" /><div className="hero-connector hero-connector--b" /></div>
     </motion.section>
     <section className="landing-stats"><div><span className="landing-stats__value">{documents.length || 0}</span><span className="landing-stats__label">Evidence records</span></div><div><span className="landing-stats__value">{valid}</span><span className="landing-stats__label">Verified chains</span></div><div className={compromised ? 'landing-stats__alert' : ''}><span className="landing-stats__value">{compromised}</span><span className="landing-stats__label">Compromised</span></div><div><span className="landing-stats__value">{apiOnline ? 'ONLINE' : 'OFFLINE'}</span><span className="landing-stats__label">Backend status</span></div></section>
     <section className="landing-section"><div className="landing-section__heading"><div><SectionEyebrow icon={Activity}>WHY SAKSHYA</SectionEyebrow><h2>Evidence history that stands up to scrutiny.</h2></div><p>Built for the operational reality of law enforcement and the evidentiary standards of the judiciary.</p></div><div className="landing-feature-grid"><FeatureCard icon={Fingerprint} number="01" title="Seal once. Verify forever." text="Each custody event is linked to the previous record using a SHA-256 fingerprint, making unauthorised changes mathematically visible." /><FeatureCard icon={Users} number="02" title="Accountability at every handover." text="Officer identity, badge, location and time are recorded together so responsibility never gets lost between departments." /><FeatureCard icon={FileCheck2} number="03" title="Court-ready by design." text="Generate an official report with signatures, timestamps and cryptographic proof for judicial review." /></div></section>
     <section className="landing-chain-section"><div className="landing-section__heading"><div><SectionEyebrow icon={Network}>LIVE SYSTEM MODEL</SectionEyebrow><h2>A transparent chain for an invisible guarantee.</h2></div><Link to={leadLink} className="text-link">{leadDocument ? 'Explore a custody record' : 'Register the first record'} <ArrowUpRight size={15} /></Link></div><HashChainVisualizer chain={leadDocument?.chain?.slice(0, 4) || []} compact /></section>
-    <div className="landing-cta"><div><SectionEyebrow icon={Building2}>NATIONAL EVIDENCE GRID</SectionEyebrow><h2>Make every record defensible.</h2><p>SAKSHYA is a Smart India Hackathon 2026 prototype for SIH26190 · Ministry of Home Affairs.</p></div><Link to="/upload" className="button button--light">Seal new evidence <FilePlus2 size={16} /></Link></div>
+    <div className="landing-cta"><div><SectionEyebrow icon={Building2}>NATIONAL EVIDENCE GRID</SectionEyebrow><h2>Make every record defensible.</h2><p>SAKSHYA is a Smart India Hackathon 2026 prototype for SIH26190 · Ministry of Home Affairs.</p></div>{permissions.upload && <Link to="/upload" className="button button--light">Seal new evidence <FilePlus2 size={16} /></Link>}</div>
   </div>;
 }
 
@@ -401,7 +711,7 @@ function FeatureCard({ icon: Icon, number, title, text }) {
   return <motion.article className="feature-card" {...motionProps(Number(number) * 0.04)}><div className="feature-card__top"><span className="feature-card__icon"><Icon size={19} /></span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><ArrowUpRight className="feature-card__arrow" size={17} /></motion.article>;
 }
 
-function DashboardPage({ documents, onRefresh, lastSync, loading, apiOnline, apiError }) {
+function DashboardPage({ documents, onRefresh, lastSync, loading, apiOnline, apiError, permissions = {} }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -422,13 +732,13 @@ function DashboardPage({ documents, onRefresh, lastSync, loading, apiOnline, api
 
   return (
     <div className="dashboard-page">
-      <PageHeader eyebrow="OPERATIONS OVERVIEW" icon={LayoutIcon} title="Command centre" description="Live custody posture across the secure evidence register." actions={<><button className="button button--secondary" type="button" onClick={() => { onRefresh(); toast.success('Evidence register refresh requested.'); }}><RefreshCw size={15} />Refresh register</button><Link className="button button--primary" to="/upload"><FilePlus2 size={15} />Seal evidence</Link></>} />
+      <PageHeader eyebrow="OPERATIONS OVERVIEW" icon={LayoutIcon} title="Command centre" description="Live custody posture across the secure evidence register." actions={<><button className="button button--secondary" type="button" onClick={() => { onRefresh(); toast.success('Evidence register refresh requested.'); }}><RefreshCw size={15} />Refresh register</button>{permissions.upload && <Link className="button button--primary" to="/upload"><FilePlus2 size={15} />Seal evidence</Link>}</>} />
       {!loading && !apiOnline && <OfflineBanner message={apiError} />}
       <section className="stats-grid command-stats">
         <StatsCard label="Evidence in custody" value={loading ? '—' : String(documents.length).padStart(2, '0')} helper={loading ? 'Loading live register…' : `${totalBlocks} linked custody blocks`} icon={FileCheck2} tone="navy" trend={apiOnline ? 'Live' : 'Offline'} onClick={() => { setFilter('all'); setQuery(''); }} />
         <StatsCard label="Verified records" value={loading ? '—' : String(validCount).padStart(2, '0')} helper="Backend-confirmed integrity" icon={ShieldCheck} tone="teal" trend={apiOnline ? 'Live' : '—'} onClick={() => { setFilter('valid'); setQuery(''); }} />
-        <StatsCard label="Open security alerts" value={loading ? '—' : String(openAlerts).padStart(2, '0')} helper={openAlerts ? 'Review before court submission' : 'No active signals'} icon={ShieldAlert} tone={openAlerts ? 'amber' : 'slate'} trend={openAlerts ? 'Review' : 'Clear'} onClick={() => navigate('/anomalies')} />
-        <StatsCard label="Pending custody actions" value={loading ? '—' : String(pendingActions).padStart(2, '0')} helper="Records awaiting a next action" icon={ClipboardCheck} tone="blue" trend={pendingActions ? 'Action' : 'Clear'} onClick={() => navigate('/transfer')} />
+        <StatsCard label="Open security alerts" value={loading ? '—' : String(openAlerts).padStart(2, '0')} helper={openAlerts ? 'Review before court submission' : permissions.incidents ? 'No active signals' : 'Restricted to Senior Authority'} icon={ShieldAlert} tone={openAlerts ? 'amber' : 'slate'} trend={openAlerts ? 'Review' : 'Clear'} onClick={permissions.incidents ? () => navigate('/anomalies') : undefined} />
+        <StatsCard label="Pending custody actions" value={loading ? '—' : String(pendingActions).padStart(2, '0')} helper={permissions.transfer ? 'Records awaiting a next action' : 'Transfer view restricted by role'} icon={ClipboardCheck} tone="blue" trend={pendingActions ? 'Action' : 'Clear'} onClick={permissions.transfer ? () => navigate('/transfer') : undefined} />
       </section>
       <section className="dashboard-layout">
         <div className="panel panel--activity">
@@ -462,15 +772,16 @@ function LayoutIcon(props) {
   return <Activity {...props} />;
 }
 
-function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper }) {
+function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper, permissions = {}, user }) {
   const { docId } = useParams();
   const document = documents.find((item) => item.docId === docId);
   const navigate = useNavigate();
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [result, setResult] = useState(document ? verificationFromRecord(document) : null);
+  const [operationError, setOperationError] = useState('');
   const [actionOpen, setActionOpen] = useState(false);
   const [tamperOpen, setTamperOpen] = useState(false);
-  const [actionForm, setActionForm] = useState({ action: 'VIEWED', officerName: '', officerBadge: '', details: '' });
+  const [actionForm, setActionForm] = useState({ action: 'VIEWED', officerName: user?.name || '', officerBadge: user?.badge || '', details: '' });
   const [tamperForm, setTamperForm] = useState({ blockIndex: '2', fakeData: 'Description modified outside the authorised custody workflow.' });
 
   useEffect(() => { if (document) setResult(verificationFromRecord(document)); }, [docId, document?.status, document?.chain.length]);
@@ -478,13 +789,16 @@ function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper }) {
 
   async function verify() {
     setVerifyBusy(true);
+    setOperationError('');
     try {
       await wait(220);
       const next = await onVerify(document.docId);
       setResult(next);
       toast[next.valid ? 'success' : 'error'](next.valid ? 'Custody chain verified.' : `Integrity break detected at block ${next.brokenAtIndex}.`);
     } catch (error) {
-      toast.error(error.message || 'Chain verification failed.');
+      const message = actionErrorMessage(error, 'Chain verification failed.');
+      setOperationError(message);
+      toast.error(message);
     } finally {
       setVerifyBusy(false);
     }
@@ -501,9 +815,12 @@ function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper }) {
       setActionOpen(false);
       setResult(verificationFromRecord(updated));
       setActionForm((current) => ({ ...current, details: '' }));
+      setOperationError('');
       toast.success('Custody action appended to chain.');
     } catch (error) {
-      toast.error(error.message || 'Could not append custody action.');
+      const message = actionErrorMessage(error, 'Could not append custody action.');
+      setOperationError(message);
+      toast.error(message);
     }
   }
 
@@ -513,13 +830,16 @@ function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper }) {
       const updated = await onTamper(document.docId, Number(tamperForm.blockIndex), tamperForm.fakeData);
       setTamperOpen(false);
       setResult(verificationFromRecord(updated));
+      setOperationError('');
       toast('Demo mutation applied. Verify the chain to see the break.', { icon: '⚠' });
     } catch (error) {
-      toast.error(error.message || 'Could not apply the demo mutation.');
+      const message = actionErrorMessage(error, 'Could not apply the demo mutation.');
+      setOperationError(message);
+      toast.error(message);
     }
   }
 
-  return <div className="detail-page"><PageHeader eyebrow="CUSTODY RECORD" icon={FileCheck2} title={document.docId} description={`${document.name} · ${document.caseId}`} actions={<><button className="button button--secondary" type="button" onClick={() => setActionOpen(true)}><FilePlus2 size={15} />Add action</button><button className="button button--primary" type="button" onClick={verify} disabled={verifyBusy}>{verifyBusy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{verifyBusy ? 'Verifying…' : 'Verify chain'}</button><button className="button button--danger-ghost" type="button" onClick={() => setTamperOpen(true)}><Zap size={15} />Simulate tamper</button></>} /><div className="detail-summary"><div className="detail-summary__identity"><div className="document-hero-icon"><FileText size={24} /></div><div><span className="section-eyebrow">DOCUMENT ID</span><h2>{document.docId}</h2><div className="detail-summary__badges"><StatusBadge status={document.status} /><span className="classification-badge">{document.classification}</span><span className="classification-badge">{document.evidenceType}</span></div></div></div><div className="detail-summary__stats"><div><span>Case reference</span><strong>{document.caseId}</strong></div><div><span>Chain length</span><strong>{document.chain.length} blocks</strong></div><div><span>Last activity</span><strong>{relativeTime(document.lastActivity)}</strong></div></div></div><EvidenceIntegrity document={document} /><CompromisedIncidentPanel document={document} /><SourceProvenanceCard document={document} /><VerificationResult result={result} busy={verifyBusy} onVerify={verify} /><div className="detail-main-grid"><div><HashChainVisualizer chain={document.chain} /><section className="panel timeline-panel"><div className="panel-header"><div><SectionEyebrow icon={Clock3}>CUSTODY TIMELINE</SectionEyebrow><h2>Immutable activity record</h2></div><span className="panel-counter">{document.chain.length} events</span></div><TimelineComponent chain={document.chain} /></section></div><aside className="detail-aside"><section className="panel metadata-panel"><div className="panel-header"><div><SectionEyebrow icon={Info}>RECORD METADATA</SectionEyebrow><h2>Evidence profile</h2></div><button className="icon-button" type="button"><MoreHorizontal size={17} /></button></div><MetadataRow label="Description" value={document.description} /><MetadataRow label="Evidence type" value={document.evidenceType} /><MetadataRow label="File size" value={document.size} /><MetadataRow label="Current custody" value={document.custodyHolder || 'Registered officer'} /><MetadataRow label="Registered at" value={formatTime(document.createdAt)} /><div className="metadata-divider" /><div className="metadata-seal"><ShieldCheck size={18} /><div><strong>Custody policy active</strong><span>Dual officer confirmation required for transfer.</span></div></div></section><section className="panel integrity-side-panel"><SectionEyebrow icon={Fingerprint}>INTEGRITY SUMMARY</SectionEyebrow><IntegrityMeter value={result?.valid === true ? 100 : result?.valid === false ? 0 : null} /><div className="integrity-side-row"><span>Root fingerprint</span><HashChip hash={document.originalHash || document.chain[0]?.hash} /></div><div className="integrity-side-row"><span>Current fingerprint</span><HashChip hash={document.currentHash || document.chain.at(-1)?.hash} /></div><div className="integrity-side-row"><span>Audit chain</span><strong className={document.auditChainValid === false ? 'text-danger' : 'text-success'}>{document.auditChainValid === false ? 'Invalid' : 'Valid'}</strong></div><Link to={`/reports?doc=${document.docId}`} className="button button--secondary button--full"><FileText size={15} />Open forensic report</Link></section></aside></div>{actionOpen && <Modal title="Append custody action" eyebrow="CONTROLLED WRITE" onClose={() => setActionOpen(false)}><form className="modal-form" onSubmit={submitAction}><FormField label="Action type" required><select value={actionForm.action} onChange={(event) => setActionForm({ ...actionForm, action: event.target.value })}><option>VIEWED</option><option>EDITED</option><option>COURT_ACCESSED</option></select></FormField><div className="form-grid form-grid--two"><FormField label="Officer name" required><input value={actionForm.officerName} onChange={(event) => setActionForm({ ...actionForm, officerName: event.target.value })} /></FormField><FormField label="Badge number" required><input value={actionForm.officerBadge} onChange={(event) => setActionForm({ ...actionForm, officerBadge: event.target.value })} /></FormField></div><FormField label="Action details" required><textarea value={actionForm.details} onChange={(event) => setActionForm({ ...actionForm, details: event.target.value })} placeholder="State why this action was performed…" required /></FormField><div className="modal-form__footer"><span><LockKeyhole size={14} /> This action becomes part of the signed record.</span><button className="button button--primary" type="submit">Append to chain <ArrowRight size={15} /></button></div></form></Modal>}{tamperOpen && <Modal title="Simulate tamper event" eyebrow="DEMO-ONLY CONTROL" onClose={() => setTamperOpen(false)}><form className="modal-form" onSubmit={submitTamper}><div className="warning-callout"><AlertTriangle size={17} /><div><strong>For demonstration purposes only</strong><p>This directly mutates a local block without recalculating its hash. Use Verify chain afterwards to show the mathematical break.</p></div></div><FormField label="Block to mutate" required><select value={tamperForm.blockIndex} onChange={(event) => setTamperForm({ ...tamperForm, blockIndex: event.target.value })}>{document.chain.map((entry) => <option key={entry.index} value={entry.index}>Block {String(entry.index).padStart(2, '0')} · {entry.action}</option>)}</select></FormField><FormField label="Injected fake data" required><textarea value={tamperForm.fakeData} onChange={(event) => setTamperForm({ ...tamperForm, fakeData: event.target.value })} required /></FormField><div className="modal-form__footer"><span className="text-danger"><ShieldAlert size={14} /> Chain will be marked compromised.</span><button className="button button--danger" type="submit">Apply demo mutation <Zap size={15} /></button></div></form></Modal>}</div>;
+  return <div className="detail-page"><PageHeader eyebrow="CUSTODY RECORD" icon={FileCheck2} title={document.docId} description={`${document.name} · ${document.caseId}`} actions={<>{permissions.action && <button className="button button--secondary" type="button" onClick={() => setActionOpen(true)}><FilePlus2 size={15} />Add action</button>}{permissions.verify && <button className="button button--primary" type="button" onClick={verify} disabled={verifyBusy}>{verifyBusy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{verifyBusy ? 'Verifying…' : 'Verify chain'}</button>}{permissions.tamper && <button className="button button--danger-ghost" type="button" onClick={() => setTamperOpen(true)}><Zap size={15} />Simulate tamper</button>}</>} /><BackendActionError message={operationError} /><div className="detail-summary"><div className="detail-summary__identity"><div className="document-hero-icon"><FileText size={24} /></div><div><span className="section-eyebrow">DOCUMENT ID</span><h2>{document.docId}</h2><div className="detail-summary__badges"><StatusBadge status={document.status} /><span className="classification-badge">{document.classification}</span><span className="classification-badge">{document.evidenceType}</span></div></div></div><div className="detail-summary__stats"><div><span>Case reference</span><strong>{document.caseId}</strong></div><div><span>Chain length</span><strong>{document.chain.length} blocks</strong></div><div><span>Last activity</span><strong>{relativeTime(document.lastActivity)}</strong></div></div></div><EvidenceIntegrity document={document} /><CompromisedIncidentPanel document={document} /><SourceProvenanceCard document={document} /><VerificationResult result={result} busy={verifyBusy} onVerify={permissions.verify ? verify : undefined} /><div className="detail-main-grid"><div><HashChainVisualizer chain={document.chain} /><section className="panel timeline-panel"><div className="panel-header"><div><SectionEyebrow icon={Clock3}>CUSTODY TIMELINE</SectionEyebrow><h2>Immutable activity record</h2></div><span className="panel-counter">{document.chain.length} events</span></div><TimelineComponent chain={document.chain} /></section></div><aside className="detail-aside"><section className="panel metadata-panel"><div className="panel-header"><div><SectionEyebrow icon={Info}>RECORD METADATA</SectionEyebrow><h2>Evidence profile</h2></div><button className="icon-button" type="button"><MoreHorizontal size={17} /></button></div><MetadataRow label="Description" value={document.description} /><MetadataRow label="Evidence type" value={document.evidenceType} /><MetadataRow label="File size" value={document.size} /><MetadataRow label="Current custody" value={document.custodyHolder || 'Registered officer'} /><MetadataRow label="Registered at" value={formatTime(document.createdAt)} /><div className="metadata-divider" /><div className="metadata-seal"><ShieldCheck size={18} /><div><strong>Custody policy active</strong><span>Dual officer confirmation required for transfer.</span></div></div></section><section className="panel integrity-side-panel"><SectionEyebrow icon={Fingerprint}>INTEGRITY SUMMARY</SectionEyebrow><IntegrityMeter value={result?.valid === true ? 100 : result?.valid === false ? 0 : null} /><div className="integrity-side-row"><span>Root fingerprint</span><HashChip hash={document.originalHash || document.chain[0]?.hash} /></div><div className="integrity-side-row"><span>Current fingerprint</span><HashChip hash={document.currentHash || document.chain.at(-1)?.hash} /></div><div className="integrity-side-row"><span>Audit chain</span><strong className={document.auditChainValid === false ? 'text-danger' : 'text-success'}>{document.auditChainValid === false ? 'Invalid' : 'Valid'}</strong></div>{permissions.report && <Link to={`/reports?doc=${document.docId}`} className="button button--secondary button--full"><FileText size={15} />Open forensic report</Link>}</section></aside></div>{actionOpen && <Modal title="Append custody action" eyebrow="CONTROLLED WRITE" onClose={() => setActionOpen(false)}><form className="modal-form" onSubmit={submitAction}><FormField label="Action type" required><select value={actionForm.action} onChange={(event) => setActionForm({ ...actionForm, action: event.target.value })}><option>VIEWED</option><option>EDITED</option><option>COURT_ACCESSED</option></select></FormField><div className="form-grid form-grid--two"><FormField label="Signed-in officer" required><input value={actionForm.officerName} readOnly /></FormField><FormField label="Badge number" required><input value={actionForm.officerBadge} readOnly /></FormField></div><FormField label="Action details" required><textarea value={actionForm.details} onChange={(event) => setActionForm({ ...actionForm, details: event.target.value })} placeholder="State why this action was performed…" required /></FormField><div className="modal-form__footer"><span><LockKeyhole size={14} /> This action becomes part of the signed record.</span><button className="button button--primary" type="submit">Append to chain <ArrowRight size={15} /></button></div></form></Modal>}{tamperOpen && <Modal title="Simulate tamper event" eyebrow="DEMO-ONLY CONTROL" onClose={() => setTamperOpen(false)}><form className="modal-form" onSubmit={submitTamper}><div className="warning-callout"><AlertTriangle size={17} /><div><strong>For demonstration purposes only</strong><p>This directly mutates a local block without recalculating its hash. Use Verify chain afterwards to show the mathematical break.</p></div></div><FormField label="Block to mutate" required><select value={tamperForm.blockIndex} onChange={(event) => setTamperForm({ ...tamperForm, blockIndex: event.target.value })}>{document.chain.map((entry) => <option key={entry.index} value={entry.index}>Block {String(entry.index).padStart(2, '0')} · {entry.action}</option>)}</select></FormField><FormField label="Injected fake data" required><textarea value={tamperForm.fakeData} onChange={(event) => setTamperForm({ ...tamperForm, fakeData: event.target.value })} required /></FormField><div className="modal-form__footer"><span className="text-danger"><ShieldAlert size={14} /> Chain will be marked compromised.</span><button className="button button--danger" type="submit">Apply demo mutation <Zap size={15} /></button></div></form></Modal>}</div>;
 }
 
 function EvidenceIntegrity({ document }) {
@@ -593,8 +913,8 @@ function FormField({ label, required, hint, children }) {
   return <label className="form-field"><span>{label}{required && <i>*</i>}{hint && <small>{hint}</small>}</span>{children}</label>;
 }
 
-function UploadPage({ onUpload, apiOnline, apiError }) {
-  const [form, setForm] = useState({ docId: '', caseId: '', officerName: '', officerBadge: '', description: '', evidenceType: 'Digital Document', classification: 'Sensitive' });
+function UploadPage({ onUpload, apiOnline, apiError, user }) {
+  const [form, setForm] = useState({ docId: '', caseId: '', officerName: user?.name || '', officerBadge: user?.badge || '', officerRole: user?.role || '', description: '', evidenceType: 'Digital Document', classification: 'Sensitive' });
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [errors, setErrors] = useState({});
@@ -652,11 +972,12 @@ function UploadPage({ onUpload, apiOnline, apiError }) {
   return <div className="upload-page"><PageHeader eyebrow="EVIDENCE INTAKE" icon={UploadCloud} title="Seal new evidence" description="Create a cryptographic root record before evidence enters the custody workflow." actions={<div className={cn('secure-context', !apiOnline && 'secure-context--offline')}><LockKeyhole size={14} /><span>{apiOnline ? 'Live API write · officer identity required' : 'Backend unavailable · write paused'}</span></div>} />{!apiOnline && <OfflineBanner message={apiError} />}<div className="upload-layout"><form className="panel upload-form" onSubmit={submit}><div className="panel-header"><div><SectionEyebrow icon={FilePlus2}>RECORD DETAILS</SectionEyebrow><h2>Evidence metadata</h2></div><span className="required-note"><i>*</i> required</span></div><div className="form-grid form-grid--two"><FormField label="Document ID" required hint="Unique custody reference"><div className="input-with-prefix"><span>SAK</span><input value={form.docId} onChange={(event) => setField('docId', event.target.value)} placeholder="DOC-2026-00218" /></div>{errors.docId && <small className="field-error">{errors.docId}</small>}</FormField><FormField label="Case reference" required><input value={form.caseId} onChange={(event) => setField('caseId', event.target.value)} placeholder="CASE/DEL/24-1188" />{errors.caseId && <small className="field-error">{errors.caseId}</small>}</FormField></div><div className="form-grid form-grid--two"><FormField label="Evidence type" required><select value={form.evidenceType} onChange={(event) => setField('evidenceType', event.target.value)}><option>Digital Document</option><option>Physical Item</option><option>Media Extract</option><option>Forensic Image</option></select></FormField><FormField label="Classification level" required><select value={form.classification} onChange={(event) => setField('classification', event.target.value)}><option>Normal</option><option>Sensitive</option><option>Classified</option></select></FormField></div><FormField label="Description" required hint="This description becomes part of the signed block"><textarea value={form.description} onChange={(event) => setField('description', event.target.value)} placeholder="Describe what this evidence contains and why it is being registered…" />{errors.description && <small className="field-error">{errors.description}</small>}</FormField><div className="form-divider" /><div className="panel-header panel-header--form"><div><SectionEyebrow icon={UserCheck}>REGISTERING OFFICER</SectionEyebrow><h2>Identity confirmation</h2></div><span className="operator-note"><UserCheck size={13} /> Officer identity required</span></div><div className="form-grid form-grid--two"><FormField label="Officer name" required><input value={form.officerName} onChange={(event) => setField('officerName', event.target.value)} />{errors.officerName && <small className="field-error">{errors.officerName}</small>}</FormField><FormField label="Badge / department ID" required><input value={form.officerBadge} onChange={(event) => setField('officerBadge', event.target.value)} />{errors.officerBadge && <small className="field-error">{errors.officerBadge}</small>}</FormField></div><div className="form-submit-row"><span><ShieldCheck size={14} /> Metadata will be sealed with the current timestamp.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <LockKeyhole size={15} />}{busy ? 'Sealing record…' : 'Seal & register evidence'}</button></div></form><aside className="upload-side"><section className="panel drop-panel"><div className="panel-header"><div><SectionEyebrow icon={FileText}>SOURCE PACKAGE</SectionEyebrow><h2>Attach evidence</h2></div><span className="optional-note">optional in demo</span></div><label className={cn('dropzone', dragging && 'dropzone--dragging')} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files?.[0]); }}><input type="file" onChange={(event) => selectFile(event.target.files?.[0])} /><span className="dropzone__icon"><UploadCloud size={24} /></span><strong>{file ? file.name : 'Drop a source package here'}</strong><span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ${file.type || 'application/octet-stream'}` : 'PDF, image, audio, video or forensic archive'}</span><small>Maximum prototype payload · 500 MB</small></label>{file && <div className="file-preview"><FileText size={16} /><div><strong>{file.name}</strong><span>Ready for fingerprinting</span></div><button className="icon-button" type="button" onClick={() => setFile(null)} aria-label="Remove attached file"><X size={15} /></button></div>}</section><section className="panel fingerprint-panel"><div className="panel-header"><div><SectionEyebrow icon={Fingerprint}>CRYPTOGRAPHIC FINGERPRINT</SectionEyebrow><h2>Root hash generation</h2></div><span className={cn('hash-state', `hash-state--${fingerprint.status}`)}>{fingerprint.status === 'done' ? 'READY' : fingerprint.status === 'generating' ? 'PREPARING' : 'AWAITING'}</span></div><div className="fingerprint-workspace"><div className="fingerprint-graphic"><div className={cn('fingerprint-core', fingerprint.status === 'generating' && 'fingerprint-core--active', fingerprint.status === 'done' && 'fingerprint-core--done')}><Fingerprint size={29} /></div><span className="fingerprint-ring fingerprint-ring--one" /><span className="fingerprint-ring fingerprint-ring--two" /></div><div className="fingerprint-copy">{fingerprint.status === 'idle' && <><strong>Awaiting secure request</strong><p>The backend returns the SHA-256 root only after the evidence metadata is submitted.</p></>}{fingerprint.status === 'generating' && <><strong>Preparing secure seal…</strong><p>Packaging the metadata and optional source file for the backend fingerprint engine.</p></>}{fingerprint.status === 'done' && <><strong>Request prepared</strong><p className="mono">Sealed hash appears after backend confirmation</p></>}</div></div><div className="fingerprint-progress"><span style={{ width: `${fingerprint.progress}%` }} /><small>{fingerprint.status === 'done' ? 'READY' : `${fingerprint.progress}%`}</small></div><button className="button button--secondary button--full" type="button" onClick={generateFingerprint} disabled={fingerprint.status === 'generating'}>{fingerprint.status === 'done' ? <><Check size={15} />Request prepared</> : <><Fingerprint size={15} />Prepare secure seal</>}</button></section></aside></div>{success && <Modal title="Evidence sealed successfully" eyebrow="CHAIN ROOT CREATED" onClose={() => setSuccess(null)}><div className="success-modal"><div className="success-modal__icon"><ShieldCheck size={30} /></div><h3>{success.docId}</h3><p>The evidence record is now the first verified block in a new chain of custody.</p><div className="success-modal__hash"><span>ROOT FINGERPRINT</span><HashChip hash={success.chain[0]?.hash} /></div><div className="success-modal__details"><span><strong>Case reference</strong>{success.caseId}</span><span><strong>Registered by</strong>{success.chain[0]?.officer}</span></div><div className="modal-form__footer"><Link to={`/document/${success.docId}`} className="button button--primary" onClick={() => setSuccess(null)}>Open custody record <ArrowRight size={15} /></Link><button className="button button--secondary" type="button" onClick={() => setSuccess(null)}>Seal another</button></div></div></Modal>}</div>;
 }
 
-function VerifyPage({ documents, onVerify, apiOnline, apiError }) {
+function VerifyPage({ documents, onVerify, apiOnline, apiError, permissions = {} }) {
   const [selectedId, setSelectedId] = useState(documents[0]?.docId || '');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [operationError, setOperationError] = useState('');
   const document = documents.find((item) => item.docId === selectedId);
 
   useEffect(() => {
@@ -668,6 +989,7 @@ function VerifyPage({ documents, onVerify, apiOnline, apiError }) {
     setBusy(true);
     setResult(null);
     setLogs([]);
+    setOperationError('');
     try {
       const checks = ['Loading signed chain manifest', `Checking ${document.chain.length} block fingerprints`, 'Comparing previous-hash pointers', 'Validating officer and timestamp metadata', 'Writing verification result to audit stream'];
       for (const [index, check] of checks.entries()) {
@@ -678,13 +1000,15 @@ function VerifyPage({ documents, onVerify, apiOnline, apiError }) {
       setResult(next);
       toast[next.valid ? 'success' : 'error'](next.valid ? 'Chain valid — all links verified.' : `Tampering detected at block ${next.brokenAtIndex}.`);
     } catch (error) {
-      toast.error(error.message || 'Could not verify this chain.');
+      const message = actionErrorMessage(error, 'Could not verify this chain.');
+      setOperationError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
   }
 
-  return <div className="verify-page"><PageHeader eyebrow="INTEGRITY VERIFICATION" icon={ShieldCheck} title="Chain verifier" description="Recompute the evidence history and confirm that no custody record has changed." actions={<Link to="/demo" className="button button--secondary"><Network size={15} />Open judge demo</Link>} />{!apiOnline && <OfflineBanner message={apiError} />}<div className="verify-layout"><section className="panel verify-control"><div className="panel-header"><div><SectionEyebrow icon={FileCheck2}>SELECT RECORD</SectionEyebrow><h2>Evidence to verify</h2></div><StatusBadge status={apiOnline ? 'online' : 'offline'} label={apiOnline ? 'Backend reachable' : 'API unavailable'} /></div><FormField label="Document or case record"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setResult(null); setLogs([]); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField>{document && <div className="verify-document-card"><div className="document-hero-icon"><FileText size={21} /></div><div><strong>{document.docId}</strong><span>{document.caseId}</span><small>{document.chain.length} linked blocks · {document.classification}</small></div><StatusBadge status={document.status} /></div>}<button className="button button--primary button--full verify-button" type="button" onClick={runVerification} disabled={busy || !document || !apiOnline}>{busy ? <><LoaderCircle size={17} className="spin" />Verifying custody chain…</> : <><ShieldCheck size={17} />Verify chain integrity</>}</button><div className="verify-note"><Info size={14} /><span>{apiOnline ? 'The engine recomputes each block locally and compares its stored fingerprint with the linked previous hash.' : 'Reconnect the backend before requesting a cryptographic verification.'}</span></div></section><section className="verify-result-column">{result || busy ? <VerificationResult result={result || { details: 'Verification engine is checking every linked block.' }} busy={busy} /> : <div className="verify-placeholder"><div className="verify-placeholder__icon"><ShieldCheck size={34} /></div><h2>{apiOnline ? 'Ready to verify' : 'Verification unavailable'}</h2><p>{apiOnline ? 'Select a record and run the integrity engine. The result will include the exact block where a chain diverges.' : 'The live backend must confirm the chain before a result can be shown.'}</p></div>}<div className="panel verification-log"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>VERIFICATION LOG</SectionEyebrow><h2>Engine activity</h2></div><span className="mono">{logs.length}/{5} checks</span></div>{logs.length ? <div className="log-list">{logs.map((log, index) => <motion.div className="log-row" key={`${log.text}-${index}`} {...motionProps(index * 0.03)}><span className="log-row__icon"><Check size={13} /></span><div><strong>{log.text}</strong><span>{formatTime(log.time)}</span></div><code>PASS</code></motion.div>)}</div> : <EmptyState icon={Terminal} title="No verification run yet" text="Your cryptographic verification trace will appear here." />}</div></section></div>{result && !result.valid && <section className="panel broken-block-panel"><div className="broken-block-panel__icon"><AlertTriangle size={19} /></div><div><SectionEyebrow>EXCEPTION LOCATION</SectionEyebrow><h2>Broken link detected at block {String(result.brokenAtIndex).padStart(2, '0')}</h2><p>{result.details}</p></div><Link to={`/document/${selectedId}`} className="button button--danger-ghost">Inspect custody record <ArrowRight size={15} /></Link></section>}</div>;
+  return <div className="verify-page"><PageHeader eyebrow="INTEGRITY VERIFICATION" icon={ShieldCheck} title="Chain verifier" description="Recompute the evidence history and confirm that no custody record has changed." actions={permissions.tamper && <Link to="/demo" className="button button--secondary"><Network size={15} />Open judge demo</Link>} />{!apiOnline && <OfflineBanner message={apiError} />}<BackendActionError message={operationError} /><div className="verify-layout"><section className="panel verify-control"><div className="panel-header"><div><SectionEyebrow icon={FileCheck2}>SELECT RECORD</SectionEyebrow><h2>Evidence to verify</h2></div><StatusBadge status={apiOnline ? 'online' : 'offline'} label={apiOnline ? 'Backend reachable' : 'API unavailable'} /></div><FormField label="Document or case record"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setResult(null); setLogs([]); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField>{document && <div className="verify-document-card"><div className="document-hero-icon"><FileText size={21} /></div><div><strong>{document.docId}</strong><span>{document.caseId}</span><small>{document.chain.length} linked blocks · {document.classification}</small></div><StatusBadge status={document.status} /></div>}<button className="button button--primary button--full verify-button" type="button" onClick={runVerification} disabled={busy || !document || !apiOnline}>{busy ? <><LoaderCircle size={17} className="spin" />Verifying custody chain…</> : <><ShieldCheck size={17} />Verify chain integrity</>}</button><div className="verify-note"><Info size={14} /><span>{apiOnline ? 'The engine recomputes each block locally and compares its stored fingerprint with the linked previous hash.' : 'Reconnect the backend before requesting a cryptographic verification.'}</span></div></section><section className="verify-result-column">{result || busy ? <VerificationResult result={result || { details: 'Verification engine is checking every linked block.' }} busy={busy} /> : <div className="verify-placeholder"><div className="verify-placeholder__icon"><ShieldCheck size={34} /></div><h2>{apiOnline ? 'Ready to verify' : 'Verification unavailable'}</h2><p>{apiOnline ? 'Select a record and run the integrity engine. The result will include the exact block where a chain diverges.' : 'The live backend must confirm the chain before a result can be shown.'}</p></div>}<div className="panel verification-log"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>VERIFICATION LOG</SectionEyebrow><h2>Engine activity</h2></div><span className="mono">{logs.length}/{5} checks</span></div>{logs.length ? <div className="log-list">{logs.map((log, index) => <motion.div className="log-row" key={`${log.text}-${index}`} {...motionProps(index * 0.03)}><span className="log-row__icon"><Check size={13} /></span><div><strong>{log.text}</strong><span>{formatTime(log.time)}</span></div><code>PASS</code></motion.div>)}</div> : <EmptyState icon={Terminal} title="No verification run yet" text="Your cryptographic verification trace will appear here." />}</div></section></div>{result && !result.valid && <section className="panel broken-block-panel"><div className="broken-block-panel__icon"><AlertTriangle size={19} /></div><div><SectionEyebrow>EXCEPTION LOCATION</SectionEyebrow><h2>Broken link detected at block {String(result.brokenAtIndex).padStart(2, '0')}</h2><p>{result.details}</p></div><Link to={`/document/${selectedId}`} className="button button--danger-ghost">Inspect custody record <ArrowRight size={15} /></Link></section>}</div>;
 }
 
 
@@ -708,7 +1032,7 @@ function DemoProgress({ steps }) {
   return <ol className="demo-progress" aria-label="Live demo progress">{steps.map((step, index) => <li className={cn('demo-progress__step', step.done && 'demo-progress__step--done', !step.done && index === firstPending && 'demo-progress__step--current')} key={step.key}><span>{step.done ? <Check size={13} /> : String(index + 1).padStart(2, '0')}</span><strong>{step.label}</strong><small>{step.done ? 'Complete' : index === firstPending ? 'Next' : 'Pending'}</small>{index < steps.length - 1 && <i className={cn('demo-progress__line', step.done && 'demo-progress__line--done')} />}</li>)}</ol>;
 }
 
-function DemoPage({ documents, onTamper, onVerify, reportIds = [] }) {
+function DemoPage({ documents, onTamper, onVerify, reportIds = [], canVerify = false, canUpload = false }) {
   const candidate = documents.find((item) => item.status === 'valid') || documents[0];
   const [selectedId, setSelectedId] = useState(candidate?.docId || '');
   const [baseline, setBaseline] = useState(() => JSON.parse(JSON.stringify(candidate?.chain || [])));
@@ -757,6 +1081,10 @@ function DemoPage({ documents, onTamper, onVerify, reportIds = [] }) {
 
   async function verifyMutated() {
     if (!document) return;
+    if (!canVerify) {
+      toast.error('You do not have permission to verify this chain. Switch to a Forensic Analyst or Court Viewer role.');
+      return;
+    }
     setChecking(true);
     setLogs((current) => [...current, `Verifying ${document.chain.length} linked blocks`]);
     try {
@@ -770,9 +1098,9 @@ function DemoPage({ documents, onTamper, onVerify, reportIds = [] }) {
     }
   }
 
-  if (!document) return <div className="demo-page"><PageHeader eyebrow="DEMONSTRATION MODE" icon={Network} title="Show the proof" description="Run the tamper demonstration against a live evidence record." /><div className="panel"><EmptyState icon={FileCheck2} title="No live evidence record" text="Seal a record first. Demo mode never fabricates a production chain." /><Link to="/upload" className="button button--primary">Seal new evidence <ArrowRight size={15} /></Link></div></div>;
+  if (!document) return <div className="demo-page"><PageHeader eyebrow="DEMONSTRATION MODE" icon={Network} title="Show the proof" description="Run the tamper demonstration against a live evidence record." /><div className="panel"><EmptyState icon={FileCheck2} title="No live evidence record" text="Seal a record first. Demo mode never fabricates a production chain." />{canUpload && <Link to="/upload" className="button button--primary">Seal new evidence <ArrowRight size={15} /></Link>}</div></div>;
 
-  return <div className="demo-page"><Joyride steps={tourSteps} run={tourRunning} continuous showProgress showSkipButton callback={(data) => { if (['finished', 'skipped'].includes(data.status)) setTourRunning(false); }} styles={{ options: { primaryColor: '#0a2540', zIndex: 120 } }} /><PageHeader eyebrow="DEMONSTRATION MODE" icon={Network} title="Show the proof" description="A controlled, visual walkthrough of how a hash chain exposes an unauthorised change." actions={<div className="demo-head-actions"><button className="button button--secondary" type="button" onClick={() => setTourRunning(true)}><Info size={15} />Guided tour</button><div className="demo-mode-badge"><span className="pulse-dot pulse-dot--amber" />Judge presentation mode</div></div>} /><DemoProgress steps={progress} /><section className="demo-command"><div className="demo-command__copy"><SectionEyebrow icon={FileCheck2}>SELECT A LIVE RECORD</SectionEyebrow><h2>Run the before / after test</h2><p>Use a real backend record to explain the integrity guarantee in under two minutes.</p></div><div className="demo-command__controls"><select id="demo-record-select" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setTampered(false); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select>{tamperActive ? <><button id="demo-tamper-action" className="button button--secondary" type="button" onClick={verifyMutated} disabled={checking}>{checking ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{checking ? 'Verifying…' : 'Verify mutated chain'}</button><Link className="button button--ghost" to="/upload">Use new evidence</Link></> : <button id="demo-tamper-action" className="button button--danger" type="button" onClick={simulate} disabled={checking}>{checking ? <LoaderCircle size={15} className="spin" /> : <Zap size={15} />}{checking ? 'Applying mutation…' : 'Simulate tamper'}</button>}</div></section><div className="demo-comparison"><DemoChainColumn tourId="demo-before-card" title="Before tamper" subtitle="Captured live baseline" chain={baseline} valid={!candidate?.tampered} /><div className="demo-divider"><span>THEN</span><ArrowRight size={17} /><span>NOW</span></div><DemoChainColumn title="After tamper" subtitle={tamperActive ? 'Backend-reported state' : 'Awaiting simulation'} chain={afterChain} valid={tamperActive ? afterResult?.valid === true : true} brokenAtIndex={afterResult?.brokenAtIndex} /><div className="demo-result-badge"><span className={tamperActive ? 'demo-result-badge--bad' : 'demo-result-badge--good'}>{tamperActive ? <ShieldAlert size={18} /> : <ShieldCheck size={18} />}</span><strong>{tamperActive ? 'CHAIN BREAK VISIBLE' : 'CHAIN INTACT'}</strong><small>{tamperActive ? `Backend reports block ${afterResult?.brokenAtIndex ?? '—'} for review` : 'No mismatch detected'}</small></div></div><div className="comparison-control"><span>Original state</span><input aria-label="Compare original and mutated states" type="range" min="0" max="100" value={comparison} onChange={(event) => setComparison(Number(event.target.value))} /><span>Mutated state</span><strong>{comparison}% focus</strong></div><section className="demo-lower-grid"><div className="panel explainer-panel"><SectionEyebrow icon={Fingerprint}>HOW THE DETECTION WORKS</SectionEyebrow><h2>One changed value breaks the link.</h2><div className="explainer-steps"><ExplainerStep number="01" title="Each action is hashed" text="The block stores its own data fingerprint — including officer, time and action." /><ExplainerStep number="02" title="The next block remembers it" text="Every new record stores the previous block’s hash, creating a linked sequence." /><ExplainerStep number="03" title="Verification recomputes everything" text="A single altered value produces a different fingerprint and exposes the exact break." /></div><Link to="/verify" className="text-link">Open full chain verifier <ArrowRight size={15} /></Link></div><div id="demo-terminal" className="panel terminal-panel"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>LIVE DEMO TRACE</SectionEyebrow><h2>Integrity engine console</h2></div><span className="terminal-live"><span /> LIVE</span></div><div className="terminal-window"><div className="terminal-window__bar"><span /><span /><span /><code>sakshya-integrity-engine</code></div><div className="terminal-output">{logs.map((log, index) => <div key={`${log}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><code><i>›</i> {log}{index === logs.length - 1 && <b className="terminal-cursor" />}</code></div>)}</div></div><div className="terminal-footer"><span><span className="pulse-dot pulse-dot--green" />Live backend record</span><code>SHA-256 / chained</code></div></div></section></div>;
+  return <div className="demo-page"><Joyride steps={tourSteps} run={tourRunning} continuous showProgress showSkipButton callback={(data) => { if (['finished', 'skipped'].includes(data.status)) setTourRunning(false); }} styles={{ options: { primaryColor: '#0a2540', zIndex: 120 } }} /><PageHeader eyebrow="DEMONSTRATION MODE" icon={Network} title="Show the proof" description="A controlled, visual walkthrough of how a hash chain exposes an unauthorised change." actions={<div className="demo-head-actions"><button className="button button--secondary" type="button" onClick={() => setTourRunning(true)}><Info size={15} />Guided tour</button><div className="demo-mode-badge"><span className="pulse-dot pulse-dot--amber" />Judge presentation mode</div></div>} /><DemoProgress steps={progress} /><section className="demo-command"><div className="demo-command__copy"><SectionEyebrow icon={FileCheck2}>SELECT A LIVE RECORD</SectionEyebrow><h2>Run the before / after test</h2><p>Use a real backend record to explain the integrity guarantee in under two minutes.</p></div><div className="demo-command__controls"><select id="demo-record-select" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setTampered(false); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select>{tamperActive ? <>{canVerify ? <button id="demo-tamper-action" className="button button--secondary" type="button" onClick={verifyMutated} disabled={checking}>{checking ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{checking ? 'Verifying…' : 'Verify mutated chain'}</button> : <button id="demo-tamper-action" className="button button--secondary" type="button" disabled title="Sign in as a Forensic Analyst or Court Viewer to verify"><LockKeyhole size={15} />Switch role to verify</button>}<Link className="button button--ghost" to="/upload">Use new evidence</Link></> : <button id="demo-tamper-action" className="button button--danger" type="button" onClick={simulate} disabled={checking}>{checking ? <LoaderCircle size={15} className="spin" /> : <Zap size={15} />}{checking ? 'Applying mutation…' : 'Simulate tamper'}</button>}</div></section><div className="demo-comparison"><DemoChainColumn tourId="demo-before-card" title="Before tamper" subtitle="Captured live baseline" chain={baseline} valid={!candidate?.tampered} /><div className="demo-divider"><span>THEN</span><ArrowRight size={17} /><span>NOW</span></div><DemoChainColumn title="After tamper" subtitle={tamperActive ? 'Backend-reported state' : 'Awaiting simulation'} chain={afterChain} valid={tamperActive ? afterResult?.valid === true : true} brokenAtIndex={afterResult?.brokenAtIndex} /><div className="demo-result-badge"><span className={tamperActive ? 'demo-result-badge--bad' : 'demo-result-badge--good'}>{tamperActive ? <ShieldAlert size={18} /> : <ShieldCheck size={18} />}</span><strong>{tamperActive ? 'CHAIN BREAK VISIBLE' : 'CHAIN INTACT'}</strong><small>{tamperActive ? `Backend reports block ${afterResult?.brokenAtIndex ?? '—'} for review` : 'No mismatch detected'}</small></div></div><div className="comparison-control"><span>Original state</span><input aria-label="Compare original and mutated states" type="range" min="0" max="100" value={comparison} onChange={(event) => setComparison(Number(event.target.value))} /><span>Mutated state</span><strong>{comparison}% focus</strong></div><section className="demo-lower-grid"><div className="panel explainer-panel"><SectionEyebrow icon={Fingerprint}>HOW THE DETECTION WORKS</SectionEyebrow><h2>One changed value breaks the link.</h2><div className="explainer-steps"><ExplainerStep number="01" title="Each action is hashed" text="The block stores its own data fingerprint — including officer, time and action." /><ExplainerStep number="02" title="The next block remembers it" text="Every new record stores the previous block’s hash, creating a linked sequence." /><ExplainerStep number="03" title="Verification recomputes everything" text="A single altered value produces a different fingerprint and exposes the exact break." /></div><Link to="/verify" className="text-link">Open full chain verifier <ArrowRight size={15} /></Link></div><div id="demo-terminal" className="panel terminal-panel"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>LIVE DEMO TRACE</SectionEyebrow><h2>Integrity engine console</h2></div><span className="terminal-live"><span /> LIVE</span></div><div className="terminal-window"><div className="terminal-window__bar"><span /><span /><span /><code>sakshya-integrity-engine</code></div><div className="terminal-output">{logs.map((log, index) => <div key={`${log}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><code><i>›</i> {log}{index === logs.length - 1 && <b className="terminal-cursor" />}</code></div>)}</div></div><div className="terminal-footer"><span><span className="pulse-dot pulse-dot--green" />Live backend record</span><code>SHA-256 / chained</code></div></div></section></div>;
 }
 
 function DemoChainColumn({ title, subtitle, chain = [], valid, brokenAtIndex, tourId }) {
@@ -840,6 +1168,7 @@ function ReportsPage({ documents, onReportGenerated, apiOnline, apiError }) {
   const [selectedId, setSelectedId] = useState(params.get('doc') || documents[0]?.docId || '');
   const [reportData, setReportData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [reportError, setReportError] = useState('');
   const document = documents.find((item) => item.docId === selectedId) || documents[0];
   const reportId = document?.docId;
@@ -911,9 +1240,28 @@ function ReportsPage({ documents, onReportGenerated, apiOnline, apiError }) {
     }
   }
 
+  async function downloadPdf() {
+    if (!reportId || !apiOnline) return;
+    setPdfBusy(true);
+    try {
+      const { blob, filename } = await api.downloadEvidenceReportPdf(reportId);
+      const url = URL.createObjectURL(blob);
+      const anchor = documentCreateLink(url, filename);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success('Court-ready PDF downloaded from the live backend.');
+    } catch (error) {
+      const message = actionErrorMessage(error, 'Could not download the court-ready PDF.');
+      setReportError(message);
+      toast.error(message);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   if (!document) return <div className="reports-page"><PageHeader eyebrow="JUDICIAL OUTPUT" icon={FileText} title="Forensic report generator" description="Select a live evidence record to prepare its custody proof." /><div className="panel"><EmptyState icon={FileText} title="No evidence record selected" text="Seal an evidence record first. The report workspace will use only the live backend record." /></div></div>;
 
-  return <div className="reports-page"><PageHeader eyebrow="JUDICIAL OUTPUT" icon={FileText} title="Forensic report generator" description="Assemble a court-ready evidence report with custody proof, integrity results and the complete audit timeline." actions={<><button className="button button--secondary" type="button" onClick={exportJson} disabled={busy || !apiOnline}><FileJson size={15} />Download report JSON</button><button className="button button--primary" type="button" onClick={printReport} disabled={busy || !apiOnline}><Printer size={15} />Print court copy</button></>} />{!apiOnline && <OfflineBanner message={apiError} />}<section className="report-proof-summary"><ReportProofCard label="Integrity verdict" value={busy ? 'LOADING' : verdictLabel} detail={busy ? 'Requesting report…' : overallValid === null ? 'Awaiting backend assessment' : overallValid ? 'Hash and chain match' : 'Review before submission'} status={busy || overallValid === null ? 'pending' : overallValid ? 'valid' : 'bad'} /><ReportProofCard label="Content hash" value={busy ? '—' : hashLabel} detail="Original vs current SHA-256" status={busy || evidenceHashValid === null ? 'pending' : evidenceHashValid ? 'valid' : 'bad'} /><ReportProofCard label="Audit chain" value={busy ? '—' : chainLabel} detail="Linked event verification" status={busy || auditChainValid === null ? 'pending' : auditChainValid ? 'valid' : 'bad'} /><ReportProofCard label="Security incidents" value={String(incidentCount).padStart(2, '0')} detail={reportData ? 'Returned by backend report' : 'Awaiting report endpoint'} status={incidentCount ? 'bad' : reportData ? 'valid' : 'pending'} /><ReportProofCard label="Source provenance" value={source.status.replaceAll('_', ' ')} detail={source.available ? 'Backend status returned' : 'Not exposed by backend'} status={source.status === 'SOURCE_VERIFIED' ? 'valid' : source.status === 'REVIEW_REQUIRED' ? 'bad' : 'pending'} /><ReportProofCard label="Report status" value={reportData ? 'READY' : busy ? 'LOADING' : apiOnline ? 'UNAVAILABLE' : 'OFFLINE'} detail={reportData ? `Generated ${formatTime(reportData.generatedAt)}` : reportError || 'Live report not loaded'} status={reportData ? 'valid' : 'pending'} /></section><div className="report-layout"><aside className="report-selector panel"><SectionEyebrow icon={FileCheck2}>REPORT SUBJECT</SectionEyebrow><h2>Select document</h2><FormField label="Evidence record"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setReportData(null); setReportError(''); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId}</option>)}</select></FormField><div className="report-subject"><FileText size={18} /><div><strong>{subject?.name}</strong><span>{subject?.caseId}</span><code>{subject?.docId}</code></div></div><div className="report-checks"><div><CheckCircle2 size={15} /><span>Custody timeline included</span></div><div><CheckCircle2 size={15} /><span>Hash proof attached</span></div><div><CheckCircle2 size={15} /><span>{reportData ? 'Backend attestation included' : 'Awaiting backend attestation'}</span></div></div><div className="signature-badge"><BadgeCheck size={19} /><div><strong>Integrity attestation available</strong><span>{reportData ? 'Generated from the live SQLite audit record' : 'Report endpoint required'}</span></div></div></aside><section className="report-paper-wrap"><div className="report-paper"><div className="report-paper__top"><div className="report-paper__emblem"><span>भारत सरकार</span><strong>सत्यमेव जयते</strong></div><div className="report-paper__title"><span>GOVERNMENT OF INDIA</span><strong>MINISTRY OF HOME AFFAIRS</strong><small>SECURE DIGITAL EVIDENCE DIRECTORATE</small></div><div className="report-paper__classification">RESTRICTED<br /><span>COURT COPY</span></div></div><div className="report-paper__rule" /><div className="report-paper__heading"><span>CRYPTOGRAPHIC CUSTODY REPORT</span><h2>{subject?.docId}</h2><p>{reportData ? `Generated by SAKSHYA Secure Evidence Custody Grid · ${formatTime(reportData.generatedAt)}` : 'Live report is being requested from the evidence node.'}</p></div><div className="report-paper__facts"><div><span>Case reference</span><strong>{subject?.caseId}</strong></div><div><span>Evidence item</span><strong>{subject?.name}</strong></div><div><span>Classification</span><strong>{subject?.classification}</strong></div><div><span>Integrity verdict</span><strong className={overallValid === true ? 'text-success' : overallValid === false ? 'text-danger' : ''}>{overallValid === null ? 'PENDING ASSESSMENT' : overallValid ? 'VERIFIED / INTACT' : 'COMPROMISED / REVIEW'}</strong></div></div><div className="report-paper__section"><span className="report-section-number">01</span><div><h3>Custody chain summary</h3><p>The following actions were returned by the live report endpoint. Each block includes its fingerprint and the preceding block reference.</p></div></div><div className="report-table"><div className="report-table__row report-table__head"><span>Block</span><span>Timestamp / officer</span><span>Action</span><span>Fingerprint</span></div>{subject?.chain?.map((entry) => <div className="report-table__row" key={entry.index}><span className="mono">{String(entry.index).padStart(2, '0')}</span><span><strong>{formatTime(entry.timestamp)}</strong><small>{entry.officer} · {entry.badge}</small></span><span>{entry.action.replaceAll('_', ' ')}</span><span><HashChip hash={entry.hash} copyable={false} label="" /></span></div>)}</div><div className="report-paper__section"><span className="report-section-number">02</span><div><h3>Hash verification proof</h3><p>These values are taken from the selected evidence record and the backend integrity assessment.</p></div></div><div className="report-paper__hashes"><div><span>ORIGINAL SHA-256</span><code>{subject?.originalHash || '—'}</code></div><div><span>CURRENT SHA-256</span><code>{subject?.currentHash || '—'}</code></div><div><span>AUDIT ROOT</span><code>{subject?.auditChainHead || '—'}</code></div></div><div className="report-paper__signature"><div><div className="signature-line" /><span>System attestation</span><strong>SAKSHYA INTEGRITY ENGINE</strong><small>{reportData?.attestation || 'Awaiting backend attestation.'}</small></div><div className="report-seal-stamp"><BadgeCheck size={24} /><span>{overallValid === null ? 'PENDING' : overallValid ? 'VERIFIED' : 'REVIEW'}</span></div></div><div className="report-paper__footer">This report is a prototype output for Smart India Hackathon 2026 · SIH26190 · Page 1 of 1</div></div></section></div></div>;
+  return <div className="reports-page"><PageHeader eyebrow="JUDICIAL OUTPUT" icon={FileText} title="Forensic report generator" description="Assemble a court-ready evidence report with custody proof, integrity results and the complete audit timeline." actions={<><button className="button button--secondary" type="button" onClick={exportJson} disabled={busy || !apiOnline}><FileJson size={15} />Download report JSON</button><button className="button button--secondary" type="button" onClick={downloadPdf} disabled={busy || pdfBusy || !apiOnline}><Download size={15} />{pdfBusy ? 'Preparing PDF…' : 'Download court PDF'}</button><button className="button button--primary" type="button" onClick={printReport} disabled={busy || !apiOnline}><Printer size={15} />Print court copy</button></>} />{!apiOnline && <OfflineBanner message={apiError} />}<BackendActionError message={reportError} /><section className="report-proof-summary"><ReportProofCard label="Integrity verdict" value={busy ? 'LOADING' : verdictLabel} detail={busy ? 'Requesting report…' : overallValid === null ? 'Awaiting backend assessment' : overallValid ? 'Hash and chain match' : 'Review before submission'} status={busy || overallValid === null ? 'pending' : overallValid ? 'valid' : 'bad'} /><ReportProofCard label="Content hash" value={busy ? '—' : hashLabel} detail="Original vs current SHA-256" status={busy || evidenceHashValid === null ? 'pending' : evidenceHashValid ? 'valid' : 'bad'} /><ReportProofCard label="Audit chain" value={busy ? '—' : chainLabel} detail="Linked event verification" status={busy || auditChainValid === null ? 'pending' : auditChainValid ? 'valid' : 'bad'} /><ReportProofCard label="Security incidents" value={String(incidentCount).padStart(2, '0')} detail={reportData ? 'Returned by backend report' : 'Awaiting report endpoint'} status={incidentCount ? 'bad' : reportData ? 'valid' : 'pending'} /><ReportProofCard label="Source provenance" value={source.status.replaceAll('_', ' ')} detail={source.available ? 'Backend status returned' : 'Not exposed by backend'} status={source.status === 'SOURCE_VERIFIED' ? 'valid' : source.status === 'REVIEW_REQUIRED' ? 'bad' : 'pending'} /><ReportProofCard label="Report status" value={reportData ? 'READY' : busy ? 'LOADING' : apiOnline ? 'UNAVAILABLE' : 'OFFLINE'} detail={reportData ? `Generated ${formatTime(reportData.generatedAt)}` : reportError || 'Live report not loaded'} status={reportData ? 'valid' : 'pending'} /></section><div className="report-layout"><aside className="report-selector panel"><SectionEyebrow icon={FileCheck2}>REPORT SUBJECT</SectionEyebrow><h2>Select document</h2><FormField label="Evidence record"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setReportData(null); setReportError(''); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId}</option>)}</select></FormField><div className="report-subject"><FileText size={18} /><div><strong>{subject?.name}</strong><span>{subject?.caseId}</span><code>{subject?.docId}</code></div></div><div className="report-checks"><div><CheckCircle2 size={15} /><span>Custody timeline included</span></div><div><CheckCircle2 size={15} /><span>Hash proof attached</span></div><div><CheckCircle2 size={15} /><span>{reportData ? 'Backend attestation included' : 'Awaiting backend attestation'}</span></div></div><div className="signature-badge"><BadgeCheck size={19} /><div><strong>Integrity attestation available</strong><span>{reportData ? 'Generated from the live SQLite audit record' : 'Report endpoint required'}</span></div></div></aside><section className="report-paper-wrap"><div className="report-paper"><div className="report-paper__top"><div className="report-paper__emblem"><span>भारत सरकार</span><strong>सत्यमेव जयते</strong></div><div className="report-paper__title"><span>GOVERNMENT OF INDIA</span><strong>MINISTRY OF HOME AFFAIRS</strong><small>SECURE DIGITAL EVIDENCE DIRECTORATE</small></div><div className="report-paper__classification">RESTRICTED<br /><span>COURT COPY</span></div></div><div className="report-paper__rule" /><div className="report-paper__heading"><span>CRYPTOGRAPHIC CUSTODY REPORT</span><h2>{subject?.docId}</h2><p>{reportData ? `Generated by SAKSHYA Secure Evidence Custody Grid · ${formatTime(reportData.generatedAt)}` : 'Live report is being requested from the evidence node.'}</p></div><div className="report-paper__facts"><div><span>Case reference</span><strong>{subject?.caseId}</strong></div><div><span>Evidence item</span><strong>{subject?.name}</strong></div><div><span>Classification</span><strong>{subject?.classification}</strong></div><div><span>Integrity verdict</span><strong className={overallValid === true ? 'text-success' : overallValid === false ? 'text-danger' : ''}>{overallValid === null ? 'PENDING ASSESSMENT' : overallValid ? 'VERIFIED / INTACT' : 'COMPROMISED / REVIEW'}</strong></div></div><div className="report-paper__section"><span className="report-section-number">01</span><div><h3>Custody chain summary</h3><p>The following actions were returned by the live report endpoint. Each block includes its fingerprint and the preceding block reference.</p></div></div><div className="report-table"><div className="report-table__row report-table__head"><span>Block</span><span>Timestamp / officer</span><span>Action</span><span>Fingerprint</span></div>{subject?.chain?.map((entry) => <div className="report-table__row" key={entry.index}><span className="mono">{String(entry.index).padStart(2, '0')}</span><span><strong>{formatTime(entry.timestamp)}</strong><small>{entry.officer} · {entry.badge}</small></span><span>{entry.action.replaceAll('_', ' ')}</span><span><HashChip hash={entry.hash} copyable={false} label="" /></span></div>)}</div><div className="report-paper__section"><span className="report-section-number">02</span><div><h3>Hash verification proof</h3><p>These values are taken from the selected evidence record and the backend integrity assessment.</p></div></div><div className="report-paper__hashes"><div><span>ORIGINAL SHA-256</span><code>{subject?.originalHash || '—'}</code></div><div><span>CURRENT SHA-256</span><code>{subject?.currentHash || '—'}</code></div><div><span>AUDIT ROOT</span><code>{subject?.auditChainHead || '—'}</code></div></div><div className="report-paper__signature"><div><div className="signature-line" /><span>System attestation</span><strong>SAKSHYA INTEGRITY ENGINE</strong><small>{reportData?.attestation || 'Awaiting backend attestation.'}</small></div><div className="report-seal-stamp"><BadgeCheck size={24} /><span>{overallValid === null ? 'PENDING' : overallValid ? 'VERIFIED' : 'REVIEW'}</span></div></div><div className="report-paper__footer">This report is a prototype output for Smart India Hackathon 2026 · SIH26190 · Page 1 of 1</div></div></section></div></div>;
 }
 
 function documentCreateLink(url, filename) {
@@ -924,10 +1272,11 @@ function documentCreateLink(url, filename) {
 }
 
 
-function TransferPage({ documents, onAddAction, apiOnline }) {
+function TransferPage({ documents, onRequestTransferOtp, onTransfer, apiOnline }) {
   const [selectedId, setSelectedId] = useState(documents[0]?.docId || '');
   const [stage, setStage] = useState('details');
-  const [form, setForm] = useState({ from: '', fromBadge: '', to: '', toBadge: '', reason: 'Forensic examination', fromOtp: '', toOtp: '' });
+  const [form, setForm] = useState({ from: '', fromBadge: '', to: '', toBadge: '', reason: 'Forensic examination', otp: '' });
+  const [otpTicket, setOtpTicket] = useState(null);
   const [location, setLocation] = useState('');
   const [busy, setBusy] = useState(false);
   const [transferError, setTransferError] = useState('');
@@ -940,8 +1289,9 @@ function TransferPage({ documents, onAddAction, apiOnline }) {
   }, [documents, selectedId]);
 
   useEffect(() => {
+    if (stage === 'success') return;
     setForm((current) => ({ ...current, from: currentHolder, fromBadge: document?.chain.at(-1)?.badge || '' }));
-  }, [selectedId, currentHolder]);
+  }, [selectedId, currentHolder, stage]);
 
   useEffect(() => {
     if (!navigator.geolocation) return undefined;
@@ -951,6 +1301,14 @@ function TransferPage({ documents, onAddAction, apiOnline }) {
     return undefined;
   }, []);
 
+  function resetTransferState() {
+    setStage('details');
+    setSuccess(false);
+    setOtpTicket(null);
+    setTransferError('');
+    setForm((current) => ({ ...current, to: '', toBadge: '', otp: '' }));
+  }
+
   async function continueToConfirm(event) {
     event.preventDefault();
     if (!apiOnline) { toast.error('Backend unavailable. Reconnect before preparing a custody handover.'); return; }
@@ -958,42 +1316,41 @@ function TransferPage({ documents, onAddAction, apiOnline }) {
     if (!form.from || !form.to.trim()) { toast.error('Current holder and recipient officer are required.'); return; }
     setTransferError('');
     setBusy(true);
-    await wait(200);
-    setBusy(false);
-    setStage('confirm');
-  }
-
-  async function confirmTransfer(event) {
-    event.preventDefault();
-    if (!apiOnline) { setTransferError('Backend unavailable. The handover was not submitted.'); return; }
-    if (!form.fromOtp || !form.toOtp) { setTransferError('Enter the confirmation code from both officers.'); return; }
-    setTransferError('');
-    setBusy(true);
     try {
-      await onAddAction(selectedId, {
-        action: 'TRANSFERRED',
-        officerName: form.from,
-        officerBadge: form.fromBadge,
-        fromOfficer: form.from,
-        toOfficer: form.to.trim(),
-        toOfficerBadge: form.toBadge.trim(),
-        fromOtp: form.fromOtp,
-        toOtp: form.toOtp,
-        ...(location ? { location } : {}),
-        details: `Custody transferred to ${form.to.trim()}${form.toBadge ? ` · ${form.toBadge.trim()}` : ''} for ${form.reason}. Dual confirmation recorded.`,
-      });
-      setSuccess(true);
-      setStage('success');
-      toast.success('Dual-officer custody handover completed.');
+      const ticket = await onRequestTransferOtp(selectedId, form.to.trim());
+      setOtpTicket(ticket);
+      setStage('confirm');
+      toast.success('Backend OTP generated for this custody handover.');
     } catch (error) {
-      setTransferError(error.message || 'Custody transfer was blocked.');
-      toast.error(error.message || 'Could not seal the custody handover.');
+      const message = actionErrorMessage(error, 'Could not prepare the custody handover.');
+      setTransferError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
   }
 
-  return <div className="transfer-page"><PageHeader eyebrow="CUSTODY HANDOVER" icon={Send} title="Transfer evidence" description="A dual-confirmation handover keeps physical and digital custody aligned." actions={<span className="transfer-context"><LockKeyhole size={14} />Location is optional and consent-based</span>} /><div className="transfer-layout"><section className="panel transfer-flow"><div className="stepper"><Step number="01" label="Evidence & reason" active={stage === 'details'} complete={stage !== 'details'} /><Step number="02" label="Dual confirmation" active={stage === 'confirm'} complete={stage === 'success'} /><Step number="03" label="Transfer sealed" active={stage === 'success'} /></div>{stage === 'details' && <form className="transfer-form" onSubmit={continueToConfirm}><div className="panel-header"><div><SectionEyebrow icon={QrCode}>EVIDENCE IDENTIFIER</SectionEyebrow><h2>Select a live record</h2></div><span className="backend-capability-note">QR linking not exposed by backend</span></div><div className="qr-select-row"><div className="qr-preview qr-preview--unavailable"><QrCode size={52} /><span>QR UNAVAILABLE</span><small>Use the live record selector</small></div><div className="qr-select-copy"><FormField label="Document / evidence ID" required><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField><small className="field-hint">Physical evidence QR linking will appear through an authorised backend integration.</small></div></div><div className="form-divider" /><div className="form-grid form-grid--two"><FormField label="From officer" required hint="Current record holder"><input value={form.from} readOnly placeholder="No holder returned" /></FormField><FormField label="From badge / ID"><input value={form.fromBadge} readOnly placeholder="Not returned" /></FormField></div><div className="form-grid form-grid--two"><FormField label="To officer" required><input value={form.to} onChange={(event) => setForm({ ...form, to: event.target.value })} placeholder="Recipient officer name" /></FormField><FormField label="Recipient badge / ID"><input value={form.toBadge} onChange={(event) => setForm({ ...form, toBadge: event.target.value })} placeholder="Badge or department ID" /></FormField></div><FormField label="Transfer reason" required><select value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })}><option>Forensic examination</option><option>Court production</option><option>Inter-departmental review</option><option>Secure storage relocation</option></select></FormField><LocationCard location={location} /><div className="form-submit-row"><span><LockKeyhole size={14} /> Both officers must confirm before custody changes.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={15} />}{busy ? 'Preparing handover…' : 'Continue to confirmation'}</button></div></form>}{stage === 'confirm' && <form className="transfer-form" onSubmit={confirmTransfer}><div className="handover-banner"><div className="handover-banner__icon"><Users size={20} /></div><div><SectionEyebrow icon={ClipboardCheck}>DUAL OFFICER CONFIRMATION</SectionEyebrow><h2>Both parties acknowledge custody</h2><p>{document?.docId} · {form.reason}</p></div></div>{transferError && <div className="warning-callout warning-callout--error" role="alert"><ShieldAlert size={17} /><div><strong>Transfer was not sealed</strong><p>{transferError}</p><small>Both four-digit codes must pass the backend custody policy.</small></div></div>}<div className="officer-confirm-grid"><OfficerConfirm label="FROM OFFICER" officer={form.from} badge={form.fromBadge} otp={form.fromOtp} onChange={(value) => setForm({ ...form, fromOtp: value })} /><OfficerConfirm label="TO OFFICER" officer={form.to} badge={form.toBadge} otp={form.toOtp} onChange={(value) => setForm({ ...form, toOtp: value })} /></div><LocationCard location={location} /><div className="form-submit-row"><button className="button button--secondary" type="button" onClick={() => setStage('details')}><ArrowLeft size={15} />Back</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{busy ? 'Sealing transfer…' : 'Confirm & seal handover'}</button></div></form>}{stage === 'success' && <div className="transfer-success"><div className="transfer-success__icon"><CheckCircle2 size={34} /></div><SectionEyebrow icon={ShieldCheck}>CUSTODY UPDATED</SectionEyebrow><h2>Transfer successfully sealed</h2><p>Both officers confirmed the handover. A new TRANSFERRED block has been returned by the backend.</p><div className="success-transfer-card"><span>{document?.docId}</span><strong>{form.from} <ArrowRight size={15} /> {form.to}</strong><small>{formatTime(document?.lastActivity)} · {location ? 'Authorised location context attached' : 'No location supplied'} · OTP verified</small></div><div><Link to={`/document/${selectedId}`} className="button button--primary">View updated chain <ArrowRight size={15} /></Link><button className="button button--secondary" type="button" onClick={() => { setSuccess(false); setStage('details'); setForm((current) => ({ ...current, to: '', toBadge: '', fromOtp: '', toOtp: '' })); }}>Start another handover</button></div></div>}</section><aside className="transfer-aside"><section className="panel transfer-record"><SectionEyebrow icon={FileCheck2}>SELECTED RECORD</SectionEyebrow><h2>{document?.docId || 'No record selected'}</h2><p>{document?.name || 'Choose a live evidence record to begin.'}</p><div className="transfer-record__status"><StatusBadge status={document?.status || 'pending'} /><span>{document?.chain.length || 0} existing blocks</span></div><div className="transfer-record__hash"><span>Latest linked hash</span><HashChip hash={document?.chain.at(-1)?.hash || 'GENESIS'} /></div><div className="transfer-record__holder"><span>Current custody holder</span><strong>{currentHolder || 'Not returned'}</strong></div></section><section className="panel security-note"><div className="security-note__icon"><ShieldCheck size={18} /></div><div><strong>Why two officers?</strong><p>Dual confirmation binds the custody change to both identities and prevents a single-user handover.</p></div></section></aside></div></div>;
+  async function confirmTransfer(event) {
+    event.preventDefault();
+    if (!apiOnline) { setTransferError('Backend unavailable. The handover was not submitted.'); return; }
+    if (!/^\d{6}$/.test(form.otp)) { setTransferError('Enter the 6-digit OTP returned by the backend.'); return; }
+    setTransferError('');
+    setBusy(true);
+    try {
+      await onTransfer(selectedId, form.to.trim(), form.otp);
+      setSuccess(true);
+      setStage('success');
+      toast.success('OTP-verified custody handover completed.');
+    } catch (error) {
+      const message = actionErrorMessage(error, 'Custody transfer was blocked.');
+      setTransferError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="transfer-page"><PageHeader eyebrow="CUSTODY HANDOVER" icon={Send} title="Transfer evidence" description="A backend-issued OTP binds the authenticated officer to the recipient handover." actions={<span className="transfer-context"><LockKeyhole size={14} />Location is optional and consent-based</span>} /><div className="transfer-layout"><section className="panel transfer-flow"><div className="stepper"><Step number="01" label="Evidence & reason" active={stage === 'details'} complete={stage !== 'details'} /><Step number="02" label="OTP confirmation" active={stage === 'confirm'} complete={stage === 'success'} /><Step number="03" label="Transfer sealed" active={stage === 'success'} /></div>{stage === 'details' && <form className="transfer-form" onSubmit={continueToConfirm}><div className="panel-header"><div><SectionEyebrow icon={QrCode}>EVIDENCE IDENTIFIER</SectionEyebrow><h2>Select a live record</h2></div><span className="backend-capability-note">QR linking not exposed by backend</span></div><div className="qr-select-row"><div className="qr-preview qr-preview--unavailable"><QrCode size={52} /><span>QR UNAVAILABLE</span><small>Use the live record selector</small></div><div className="qr-select-copy"><FormField label="Document / evidence ID" required><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); resetTransferState(); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField><small className="field-hint">Physical evidence QR linking will appear through an authorised backend integration.</small></div></div><div className="form-divider" /><div className="form-grid form-grid--two"><FormField label="Current holder" required hint="Returned by the live record"><input value={form.from} readOnly placeholder="No holder returned" /></FormField><FormField label="Holder badge / ID"><input value={form.fromBadge} readOnly placeholder="Not returned" /></FormField></div><div className="form-grid form-grid--two"><FormField label="Recipient officer" required><input value={form.to} onChange={(event) => setForm({ ...form, to: event.target.value })} placeholder="Recipient officer name" /></FormField><FormField label="Recipient badge / ID"><input value={form.toBadge} onChange={(event) => setForm({ ...form, toBadge: event.target.value })} placeholder="Badge or department ID" /></FormField></div><FormField label="Transfer reason" required><select value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })}><option>Forensic examination</option><option>Court production</option><option>Inter-departmental review</option><option>Secure storage relocation</option></select></FormField><LocationCard location={location} /><div className="form-submit-row"><span><LockKeyhole size={14} /> The backend will issue a time-bound OTP for this recipient.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={15} />}{busy ? 'Requesting OTP…' : 'Request handover OTP'}</button></div></form>}{stage === 'confirm' && <form className="transfer-form" onSubmit={confirmTransfer}><div className="handover-banner"><div className="handover-banner__icon"><KeyRound size={20} /></div><div><SectionEyebrow icon={ClipboardCheck}>BACKEND OTP CONFIRMATION</SectionEyebrow><h2>Confirm the custody handover</h2><p>{document?.docId} · {form.reason}</p></div></div>{transferError && <div className="warning-callout warning-callout--error" role="alert"><ShieldAlert size={17} /><div><strong>Transfer was not sealed</strong><p>{transferError}</p><small>The backend may record blocked OTP attempts as security incidents.</small></div></div>}{otpTicket?.otp && <div className="otp-ticket"><span>DEMO OTP RETURNED BY BACKEND</span><code>{otpTicket.otp}</code><small>This value is shown because the local prototype has no SMS/identity provider. It expires at {formatTime(otpTicket.expiresAt)}.</small></div>}<div className="officer-confirm-grid"><div className="officer-confirm"><span className="officer-confirm__label">AUTHENTICATED HANDOVER</span><div className="officer-confirm__identity"><div className="avatar avatar--small">{String(form.from || '?').split(' ').map((part) => part[0]).join('').slice(0, 2)}</div><div><strong>{form.from || 'Officer not returned'}</strong><span>{form.fromBadge || 'Badge not returned'}</span></div><StatusBadge status="pending" label="OTP required" /></div><label className="otp-label"><span>Enter backend OTP</span><input value={form.otp} onChange={(event) => setForm({ ...form, otp: event.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" pattern="[0-9]{6}" placeholder="••••••" aria-label="Six digit backend transfer OTP" /></label><small className="otp-hint">The backend validates this time-bound code against the selected recipient.</small></div><div className="officer-confirm officer-confirm--recipient"><span className="officer-confirm__label">RECIPIENT</span><div className="officer-confirm__identity"><div className="avatar avatar--small">{String(form.to || '?').split(' ').map((part) => part[0]).join('').slice(0, 2)}</div><div><strong>{form.to || 'Recipient not supplied'}</strong><span>{form.toBadge || 'Badge not supplied'}</span></div><StatusBadge status="pending" label="Recipient bound" /></div><small className="otp-hint">Recipient is sent to the backend with the OTP request.</small></div></div><LocationCard location={location} /><div className="form-submit-row"><button className="button button--secondary" type="button" onClick={() => setStage('details')}><ArrowLeft size={15} />Back</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{busy ? 'Sealing transfer…' : 'Confirm & seal handover'}</button></div></form>}{stage === 'success' && <div className="transfer-success"><div className="transfer-success__icon"><CheckCircle2 size={34} /></div><SectionEyebrow icon={ShieldCheck}>CUSTODY UPDATED</SectionEyebrow><h2>Transfer successfully sealed</h2><p>The authenticated officer and backend OTP confirmation have been recorded as a new TRANSFERRED event.</p><div className="success-transfer-card"><span>{document?.docId}</span><strong>{form.from} <ArrowRight size={15} /> {form.to}</strong><small>{formatTime(document?.lastActivity)} · {location ? 'Authorised location context attached' : 'No location supplied'} · OTP verified</small></div><div><Link to={`/document/${selectedId}`} className="button button--primary">View updated chain <ArrowRight size={15} /></Link><button className="button button--secondary" type="button" onClick={resetTransferState}>Start another handover</button></div></div>}</section><aside className="transfer-aside"><section className="panel transfer-record"><SectionEyebrow icon={FileCheck2}>SELECTED RECORD</SectionEyebrow><h2>{document?.docId || 'No record selected'}</h2><p>{document?.name || 'Choose a live evidence record to begin.'}</p><div className="transfer-record__status"><StatusBadge status={document?.status || 'pending'} /><span>{document?.chain.length || 0} existing blocks</span></div><div className="transfer-record__hash"><span>Latest linked hash</span><HashChip hash={document?.chain.at(-1)?.hash || 'GENESIS'} /></div><div className="transfer-record__holder"><span>Current custody holder</span><strong>{currentHolder || 'Not returned'}</strong></div></section><section className="panel security-note"><div className="security-note__icon"><ShieldCheck size={18} /></div><div><strong>Why OTP protection?</strong><p>The authenticated officer, selected recipient and time-bound backend OTP are bound to one custody event.</p></div></section></aside></div></div>;
 }
 
 function Step({ number, label, active, complete }) {

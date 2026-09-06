@@ -9,6 +9,7 @@ import {
   FilePlus2,
   Globe2,
   LayoutDashboard,
+  LogOut,
   Menu,
   Moon,
   Network,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Sun,
   Users,
+  UserRound,
   X,
 } from 'lucide-react';
 import { BrandMark, OfficialSeal, cn, relativeTime } from './ui';
@@ -28,16 +30,16 @@ import { BrandMark, OfficialSeal, cn, relativeTime } from './ui';
 const primaryNav = [
   { to: '/dashboard', label: 'Command centre', icon: LayoutDashboard, end: true },
   { to: '/dashboard?view=register', label: 'Evidence register', icon: FileCheck2 },
-  { to: '/verify', label: 'Chain verifier', icon: ShieldCheck },
-  { to: '/demo', label: 'Judge demo mode', icon: Network, demo: true },
+  { to: '/verify', label: 'Chain verifier', icon: ShieldCheck, permission: 'verify' },
+  { to: '/demo', label: 'Judge demo mode', icon: Network, demo: true, permission: 'tamper' },
 ];
 
 const operationsNav = [
-  { to: '/upload', label: 'Seal new evidence', icon: FilePlus2 },
-  { to: '/transfer', label: 'Transfer custody', icon: Send },
-  { to: '/reports', label: 'Forensic reports', icon: BookOpen },
-  { to: '/anomalies', label: 'Anomaly centre', icon: ShieldAlert },
-  { to: '/admin', label: 'Authority console', icon: Users },
+  { to: '/upload', label: 'Seal new evidence', icon: FilePlus2, permission: 'upload' },
+  { to: '/transfer', label: 'Transfer custody', icon: Send, permission: 'transfer' },
+  { to: '/reports', label: 'Forensic reports', icon: BookOpen, permission: 'report' },
+  { to: '/anomalies', label: 'Anomaly centre', icon: ShieldAlert, permission: 'incidents' },
+  { to: '/admin', label: 'Authority console', icon: Users, permission: 'admin' },
 ];
 
 function buildNotifications(documents = []) {
@@ -86,9 +88,10 @@ function SidebarLink({ item, onNavigate }) {
   );
 }
 
-export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, apiOnline, lastSync, apiError, documents = [], onMenu }) {
+export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, apiOnline, lastSync, apiError, documents = [], user, onLogout, onMenu }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
   const notifications = useMemo(() => buildNotifications(documents), [documents]);
@@ -101,6 +104,9 @@ export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, a
     }).slice(0, 5);
   }, [documents, searchQuery]);
   const apiBase = import.meta.env.VITE_API_URL || 'Not configured';
+  const displayName = user?.name || 'Authenticated operator';
+  const displayRole = user?.role || 'Role not returned';
+  const initials = displayName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '—';
 
   function openRecord(docId) {
     setSearchQuery('');
@@ -149,26 +155,36 @@ export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, a
         </div>}
         <button className={cn('theme-toggle', highContrast && 'theme-toggle--active')} type="button" onClick={onContrastChange} aria-label="Toggle high contrast mode" title="Toggle high contrast mode"><Contrast size={17} /></button>
         <button className="theme-toggle" type="button" onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle dark mode" title="Toggle dark mode">{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
-        <div className="user-menu"><div className="avatar">—</div><div className="user-menu__copy"><strong>Current operator</strong><span>Role context not returned</span></div><ChevronDown size={14} /></div>
+        <div className="profile-wrap">
+          <button className={cn('user-menu', profileOpen && 'user-menu--open')} type="button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-label="Open signed-in profile menu">
+            <div className="avatar">{initials}</div><div className="user-menu__copy"><strong>{displayName}</strong><span>{displayRole}</span></div><ChevronDown size={14} />
+          </button>
+          {profileOpen && <div className="popover profile-popover">
+            <div className="profile-popover__heading"><div className="avatar avatar--small">{initials}</div><div><strong>{displayName}</strong><span>{displayRole}</span></div></div>
+            <div className="profile-popover__meta"><span>Badge / operator ID</span><code>{user?.badge || 'Not returned'}</code></div>
+            <button className="profile-popover__action" type="button" onClick={() => { setProfileOpen(false); onLogout?.(); navigate('/'); }}><LogOut size={15} /><span><strong>Switch account / logout</strong><small>Clear the local session and return to sign-in</small></span></button>
+          </div>}
+        </div>
       </div>
     </header>
   );
 }
 
-function Sidebar({ collapsed, mobileOpen, onCollapse, onClose, documents = [] }) {
+function Sidebar({ collapsed, mobileOpen, onCollapse, onClose, documents = [], permissions = {} }) {
   const openAlerts = documents.filter((document) => document.status === 'compromised' || document.anomalyFlags?.intrusionAttempt || document.anomalyFlags?.brokenAuditChain || document.anomalyFlags?.hashMismatch).length;
-  const nav = operationsNav.map((item) => item.label === 'Anomaly centre' ? { ...item, count: openAlerts } : item);
-  return <aside className={cn('sidebar', collapsed && 'sidebar--collapsed', mobileOpen && 'sidebar--mobile-open')}><div className="sidebar__header"><div className="sidebar__seal"><OfficialSeal compact /><span>Ministry of Home Affairs<br /><strong>Secure Operations</strong></span></div><button className="sidebar-collapse" type="button" onClick={onCollapse} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" type="button" onClick={onClose} aria-label="Close navigation"><X size={18} /></button></div><nav className="sidebar__nav"><div className="sidebar-section"><span className="sidebar-section__label">Workspace</span>{primaryNav.map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section"><span className="sidebar-section__label">Operations</span>{nav.map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section sidebar-section--bottom"><span className="sidebar-section__label">System</span><button className="sidebar-link" type="button"><Settings2 size={17} /><span>System settings</span></button><button className="sidebar-link" type="button"><Globe2 size={17} /><span>Language · English</span></button></div></nav><div className="sidebar__footer"><div className="classification-strip"><span className="classification-strip__dot" /><span>RESTRICTED SYSTEM</span></div><div className="sidebar-version">SIH26190 · v0.9.6</div></div></aside>;
+  const canShow = (item) => !item.permission || permissions[item.permission];
+  const nav = operationsNav.filter(canShow).map((item) => item.label === 'Anomaly centre' ? { ...item, count: openAlerts } : item);
+  return <aside className={cn('sidebar', collapsed && 'sidebar--collapsed', mobileOpen && 'sidebar--mobile-open')}><div className="sidebar__header"><div className="sidebar__seal"><OfficialSeal compact /><span>Ministry of Home Affairs<br /><strong>Secure Operations</strong></span></div><button className="sidebar-collapse" type="button" onClick={onCollapse} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" type="button" onClick={onClose} aria-label="Close navigation"><X size={18} /></button></div><nav className="sidebar__nav"><div className="sidebar-section"><span className="sidebar-section__label">Workspace</span>{primaryNav.filter(canShow).map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section"><span className="sidebar-section__label">Operations</span>{nav.map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section sidebar-section--bottom"><span className="sidebar-section__label">System</span><button className="sidebar-link" type="button"><Settings2 size={17} /><span>System settings</span></button><button className="sidebar-link" type="button"><Globe2 size={17} /><span>Language · English</span></button></div></nav><div className="sidebar__footer"><div className="classification-strip"><span className="classification-strip__dot" /><span>RESTRICTED SYSTEM</span></div><div className="sidebar-version">SIH26190 · v0.9.6</div></div></aside>;
 }
 
 export function AppFooter() {
   return <footer className="app-footer"><div><BrandMark small /><span>SAKSHYA · Digital Evidence Integrity Platform</span></div><span>Smart India Hackathon 2026 · Problem Statement SIH26190</span><span>Ministry of Home Affairs · Government of India</span></footer>;
 }
 
-export function AppShell({ children, theme, onThemeChange, highContrast, onContrastChange, apiOnline, lastSync, apiError, documents = [] }) {
+export function AppShell({ children, theme, onThemeChange, highContrast, onContrastChange, apiOnline, lastSync, apiError, documents = [], user, permissions = {}, onLogout }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  return <div className={cn('app-shell', theme === 'dark' && 'theme-dark', highContrast && 'high-contrast')}><Navbar theme={theme} onThemeChange={onThemeChange} highContrast={highContrast} onContrastChange={onContrastChange} apiOnline={apiOnline} lastSync={lastSync} apiError={apiError} documents={documents} onMenu={() => setMobileOpen(true)} /><div className="app-frame"><Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onClose={() => setMobileOpen(false)} documents={documents} />{mobileOpen && <button className="mobile-overlay" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation overlay" />}<main className={cn('main-content', collapsed && 'main-content--wide')}><div className="breadcrumb"><span>SAKSHYA</span><span>/</span><strong><RouteLabel /></strong></div>{children}<AppFooter /></main></div></div>;
+  return <div className={cn('app-shell', theme === 'dark' && 'theme-dark', highContrast && 'high-contrast')}><Navbar theme={theme} onThemeChange={onThemeChange} highContrast={highContrast} onContrastChange={onContrastChange} apiOnline={apiOnline} lastSync={lastSync} apiError={apiError} documents={documents} user={user} onLogout={onLogout} onMenu={() => setMobileOpen(true)} /><div className="app-frame"><Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onClose={() => setMobileOpen(false)} documents={documents} permissions={permissions} />{mobileOpen && <button className="mobile-overlay" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation overlay" />}<main className={cn('main-content', collapsed && 'main-content--wide')}><div className="breadcrumb"><span>SAKSHYA</span><span>/</span><strong><RouteLabel /></strong></div>{children}<AppFooter /></main></div></div>;
 }
 
 function RouteLabel() {
