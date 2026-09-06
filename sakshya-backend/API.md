@@ -21,7 +21,7 @@ These routes are used by the React command centre:
 - `POST /api/documents/:id/reset-demo` — restore the pre-demo baseline.
 - `GET /api/documents/:id/report` — return a court-ready JSON report.
 
-For `TRANSFERRED`, the action body must include `fromOfficer`, `toOfficer`, `fromOtp`, and `toOtp`; both OTP values are any four-digit demo strings.
+For `TRANSFERRED`, the action body must include `fromOfficer`, `toOfficer`, `fromOtp`, and `toOtp`; both OTP values are any four-digit demo strings. An invalid dual confirmation is blocked with `403`, creates an `OPEN` `INVALID_TRANSFER_OTP` security incident, and returns the refreshed evidence record in `evidence`.
 
 ## `POST /api/evidence/upload`
 
@@ -63,7 +63,7 @@ Completes a custody transfer only after OTP verification. Send JSON:
 { "recipient": "Investigating Officer", "otp": "123456" }
 ```
 
-The OTP is single-use. Invalid, expired, or mismatched OTPs return clear `400` or `401` errors.
+The OTP is single-use. Invalid, expired, or mismatched OTPs return clear `400` or `401` errors. An invalid OTP is blocked, creates a persistent `OPEN` `INVALID_TRANSFER_OTP` security incident, and returns the refreshed evidence record in `evidence`.
 
 ## `POST /api/evidence/:id/tamper`
 
@@ -80,6 +80,11 @@ Each record and report expose these booleans:
 - `offHoursActivity`: at least one audit event occurred between 20:00 and 05:59 UTC.
 - `hashMismatch`: the current evidence hash differs from the original SHA-256 hash.
 - `brokenAuditChain`: an audit entry's previous hash or event hash no longer verifies.
+- `intrusionAttempt`: one or more blocked invalid-transfer incidents exist.
+
+## Security incidents
+
+Every evidence record and forensic report includes `securityIncidents`. For blocked invalid transfers, each incident records a unique ID, rule, attempted action, summary, timestamp, source network, browser/device context, and an action location only if the client voluntarily sends one. This is authorised investigation context only; it does not identify a person automatically or perform GPS tracking.
 
 ## Common errors
 
