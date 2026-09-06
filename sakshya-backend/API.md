@@ -62,3 +62,31 @@ Source provenance is an honest assessment, not a claim to detect every pre-uploa
 ## Errors
 
 `400` invalid request, `401` missing/invalid session or OTP, `403` role or transfer denial, `404` missing evidence, `409` duplicate data, and `413` files over 25 MB.
+
+## Final security extensions
+
+### Registered source devices
+
+System Admin endpoints: `GET /api/admin/source-devices`, `POST /api/admin/source-devices`, and `PATCH /api/admin/source-devices/:id`. A source device has an ID, supported type (`CCTV/DVR`, `forensic lab`, `mobile capture`, or `document system`), organisation/unit, ACTIVE/INACTIVE state and optional trusted hash/signature reference. Upload provenance checks the registry. Unknown, inactive, or reference-mismatched devices create review flags and cannot become falsely source-verified.
+
+### Network-origin traceability and incidents
+
+Sensitive actions, blocked OTP attempts, QR lookups and offline syncs persist source IP, user-agent/device context, timestamp, evidence ID and authenticated actor where available in `network_events`. Responses call this **“Approximate network-origin context for lawful authorised investigation.”** Private addresses are reported as local/private context. No external geolocation provider is configured, so the backend does not infer GPS, city, ISP, VPN status, or a person's identity.
+
+Senior Authority can update an incident using `POST /api/evidence/:id/incidents/:incidentId/status` with `status` (`UNDER_REVIEW`, `RESOLVED`, or `DISMISSED`) and a required `reason`. The original incident facts remain preserved; the reviewer, time, decision and reason are added separately and audited.
+
+### Rule-based risk and court verification
+
+Evidence and reports expose `riskScore`: a deterministic, explainable 0–100 score, risk band and reasons. It is rule-based, not machine learning. Inputs include hash/audit failure, provenance review, source-device flags, invalid OTP incidents, unresolved incidents and off-hours activity.
+
+`POST /api/evidence/:id/verification-token` creates a revocable, expiring, unguessable court-verification token (Forensic Analyst/Senior Authority). `GET /api/public/verify/:token` is read-only and public-safe: it returns only evidence ID, case ID, integrity verdict and expiry. `POST /api/evidence/:id/verification-token/:token/revoke` revokes a token (Senior Authority). `GET /api/evidence/:id/report.pdf` returns a simple local, court-friendly PDF summary. It contains no raw uploaded bytes.
+
+### Physical QR evidence twins
+
+`POST /api/physical-tags` creates a persistent physical tag mapping (Investigating Officer/System Admin) with physical tag ID, evidence ID, seal/package identifier and location. `GET /api/physical-tags` lists authorised mappings; `GET /api/physical-tags/:tag` performs an authorised read-safe lookup and records the lookup in the evidence audit chain.
+
+### Offline sync and Hindi voice parsing
+
+`POST /api/evidence/:id/sync-actions` accepts `actions` with `actionId`, `actionType` (`VIEWED` or `COURT_ACCESSED`) and monotonically increasing `sequenceNumber`. It is authenticated, idempotent, and returns `ACCEPTED`, `DUPLICATE`, `CONFLICT`, or `REVIEW_REQUIRED`; offline clients are not inherently trusted.
+
+`POST /api/voice/parse` accepts `{ "text" }` and supports safe, narrow Hindi phrases such as “Case 102 ki evidence verify karo” and “Evidence DOC-2026-001 ka report kholo”. It returns intent and normal-role confirmation requirements only; it never executes irreversible or sensitive actions.
