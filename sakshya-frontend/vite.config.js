@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  // GitHub Pages serves this app from /Sakshya/; local development stays at /.
+  base: process.env.GITHUB_ACTIONS === 'true' ? '/Sakshya/' : '/',
   server: {
     port: 5174,
     strictPort: true,
