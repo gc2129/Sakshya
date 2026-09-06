@@ -1,8 +1,48 @@
+import { authToken, clearAuthSession } from './auth';
+
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim();
 
 // Every environment must provide the API explicitly. A hosted build must
 // never silently call a developer machine on a judge's or officer's device.
 const API_BASE = configuredApiUrl.replace(/\/+$/, '');
+let authInvalidatedHandler = null;
+
+export function setAuthInvalidatedHandler(handler) {
+  authInvalidatedHandler = typeof handler === 'function' ? handler : null;
+  return () => {
+    if (authInvalidatedHandler === handler) authInvalidatedHandler = null;
+  };
+}
+
+function isSessionFailure(status, payload) {
+  if (status !== 401) return false;
+  const message = String(payload?.error || payload?.message || '').toLowerCase();
+  return message.includes('authentication is required')
+    || message.includes('invalid or expired session')
+    || message.includes('invalid session token');
+}
+
+function responseError(response, payload) {
+  const error = new Error(
+    payload?.message || payload?.error || `Request failed (${response.status})`,
+  );
+  error.status = response.status;
+  error.payload = payload;
+  error.requiredRoles = payload?.requiredRoles || [];
+  return error;
+}
+
+function requestHeaders({ isFormData, skipAuth, headers } = {}) {
+  const token = skipAuth ? '' : authToken();
+  const base = isFormData
+    ? {}
+    : { Accept: 'application/json', 'Content-Type': 'application/json' };
+  return {
+    ...base,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(headers || {}),
+  };
+}
 
 async function request(path, options = {}) {
   if (!API_BASE) {
@@ -11,26 +51,52 @@ async function request(path, options = {}) {
     throw error;
   }
 
-  const isFormData = options.body instanceof FormData;
+  const { skipAuth = false, ...fetchOptions } = options;
+  const isFormData = fetchOptions.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: isFormData
-      ? options.headers
-      : { Accept: 'application/json', 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...fetchOptions,
+    headers: requestHeaders({ isFormData, skipAuth, headers: fetchOptions.headers }),
   });
-
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const error = new Error(
-      payload?.message || payload?.error || `Request failed (${response.status})`,
-    );
-    error.status = response.status;
-    error.payload = payload;
+    const error = responseError(response, payload);
+    if (isSessionFailure(response.status, payload)) {
+      clearAuthSession();
+      authInvalidatedHandler?.(error);
+    }
     throw error;
   }
 
   return payload?.data ?? payload;
+}
+
+async function requestBlob(path, options = {}) {
+  if (!API_BASE) {
+    const error = new Error('VITE_API_URL is not configured for this deployment. Set it to the SAKSHYA API base URL.');
+    error.code = 'API_NOT_CONFIGURED';
+    throw error;
+  }
+
+  const { skipAuth = false, ...fetchOptions } = options;
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...fetchOptions,
+    headers: requestHeaders({ skipAuth, headers: fetchOptions.headers }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const error = responseError(response, payload);
+    if (isSessionFailure(response.status, payload)) {
+      clearAuthSession();
+      authInvalidatedHandler?.(error);
+    }
+    throw error;
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/i)?.[1] || 'sakshya-forensic-report.pdf',
+  };
 }
 
 const encodedId = (value) => encodeURIComponent(value);
@@ -56,7 +122,15 @@ function uploadEvidence(data) {
 export const api = {
   baseUrl: API_BASE,
 
-  getHealth: () => request('/health'),
+  login: (credentials) => request('/auth/login', {
+    method: 'POST',
+    skipAuth: true,
+    body: JSON.stringify(credentials),
+  }),
+  getCurrentUser: () => request('/auth/me'),
+  logout: () => clearAuthSession(),
+
+  getHealth: () => request('/health', { skipAuth: true }),
   getAllDocuments: () => request('/documents'),
   listEvidence: () => request('/documents'),
 
@@ -98,23 +172,33 @@ export const api = {
     body: JSON.stringify({ recipient, otp }),
   }),
 
-  resetTamper: (docId) => request(`/documents/${encodedId(docId)}/reset-demo`, {
+  getEvidenceIncidents: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/incidents`),
+  updateIncidentStatus: (evidenceId, incidentId, status, reason) => request(`/evidence/${encodedId(evidenceId)}/incidents/${encodedId(incidentId)}/status`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ status, reason }),
   }),
-  resetDemo: (evidenceId) => request(`/documents/${encodedId(evidenceId)}/reset-demo`, {
+  approveIncident: (evidenceId, incidentId, location) => request(`/evidence/${encodedId(evidenceId)}/incidents/${encodedId(incidentId)}/approve`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify(location ? { location } : {}),
   }),
+
+  getAdminUsers: () => request('/admin/users'),
+  getAdminDevices: () => request('/admin/devices'),
+  getAdminSourceDevices: () => request('/admin/source-devices'),
 
   getDocumentReport: (docId) => request(`/documents/${encodedId(docId)}/report`),
   getEvidenceReport: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/report`),
+  downloadEvidenceReportPdf: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/report.pdf`),
 };
 
 export function isApiUnavailable(error) {
   return error?.code === 'API_NOT_CONFIGURED'
     || error?.name === 'TypeError'
     || error?.message?.toLowerCase().includes('failed to fetch');
+}
+
+export function isPermissionDenied(error) {
+  return error?.status === 403;
 }
 
 export { API_BASE };
