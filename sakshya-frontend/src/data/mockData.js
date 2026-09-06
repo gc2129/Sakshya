@@ -104,19 +104,43 @@ export function cloneDocuments() {
 export function documentFromApi(record) {
   if (!record) return null;
   const id = record.docId || record.id || `DOC-${Date.now()}`;
-  const sourceTimeline = record.chain || record.timeline || [];
+  const sourceTimeline = Array.isArray(record.chain)
+    ? record.chain
+    : Array.isArray(record.timeline)
+      ? [...record.timeline].reverse()
+      : [];
+  const inferredBrokenAt = sourceTimeline.findIndex((entry) => entry.compromised || entry.verified === false);
+  const explicitBrokenAt = Number.isInteger(record.brokenAtIndex)
+    ? record.brokenAtIndex
+    : Number.isInteger(record.tamperBlockIndex)
+      ? record.tamperBlockIndex
+      : inferredBrokenAt >= 0
+        ? inferredBrokenAt
+        : null;
+  const recordCompromised = record.status === 'compromised'
+    || record.tampered === true
+    || record.valid === false
+    || record.auditChainValid === false
+    || (record.originalHash && record.currentHash && record.originalHash !== record.currentHash);
   const chain = sourceTimeline.map((entry, index) => ({
     index: entry.index ?? index,
-    action: entry.action || entry.data?.action || 'VIEWED',
+    action: ({
+      'Evidence uploaded': 'UPLOADED',
+      'Evidence viewed': 'VIEWED',
+      'Custody transferred': 'TRANSFERRED',
+      'Evidence edited': 'EDITED',
+      'Court access granted': 'COURT_ACCESSED',
+      'Integrity verified': 'VERIFIED',
+    })[entry.action] || entry.action || entry.data?.action || 'VIEWED',
     officer: entry.officer || entry.actor || entry.data?.officerName || 'Authorised Officer',
     badge: entry.badge || entry.officerBadge || entry.data?.officerBadge || '—',
     role: entry.role || 'Custody Officer',
     timestamp: entry.timestamp || entry.at || new Date().toISOString(),
     details: entry.details || entry.description || entry.data?.description || 'Custody action recorded.',
-    hash: entry.currentHash || entry.hash || record.currentHash || hash(id),
+    hash: entry.eventHash ? `sha256:${entry.eventHash}` : entry.currentHash || entry.hash || record.currentHash || hash(id),
     previousHash: entry.previousHash || 'GENESIS',
-    verified: entry.verified !== false && !record.tampered,
-    compromised: Boolean(entry.compromised || record.tampered),
+    verified: entry.verified !== false && !entry.compromised && !(recordCompromised && explicitBrokenAt !== null && index >= explicitBrokenAt),
+    compromised: Boolean(entry.compromised || (recordCompromised && explicitBrokenAt !== null && index >= explicitBrokenAt)),
     location: entry.location || 'Registered evidence facility',
   }));
   return {
@@ -127,10 +151,10 @@ export function documentFromApi(record) {
     description: record.description || 'Registered evidence record.',
     evidenceType: record.evidenceType || 'Digital Document',
     classification: record.classification || 'Sensitive',
-    size: record.size ? `${Math.round(record.size / 1024)} KB` : '—',
-    status: record.tampered ? 'compromised' : 'valid',
+    size: typeof record.size === 'number' ? `${Math.round(record.size / 1024)} KB` : record.size || '—',
+    status: recordCompromised ? 'compromised' : 'valid',
     chainLength: chain.length || record.chainLength || 1,
-    lastActivity: chain.at(-1)?.timestamp || new Date().toISOString(),
+    lastActivity: record.lastActivity || chain.at(-1)?.timestamp || new Date().toISOString(),
     chain,
   };
 }
