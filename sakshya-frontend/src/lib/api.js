@@ -20,7 +20,7 @@ export const api = {
   getHealth: () => request('/health'),
   getAllDocuments: () => request('/documents'),
   getDocumentChain: (docId) => request(`/documents/${encodeURIComponent(docId)}/chain`),
-  verifyChain: (docId) => request(`/documents/${encodeURIComponent(docId)}/verify`),
+  verifyChain: (docId) => request(`/documents/${encodeURIComponent(docId)}/verify`, { method: 'POST', body: JSON.stringify({}) }),
   uploadDocument: (data) => {
     if (data.file) {
       const form = new FormData();
@@ -40,6 +40,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ blockIndex, fakeData }),
   }),
+  resetTamper: (docId) => request(`/documents/${encodeURIComponent(docId)}/reset-demo`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }),
+  getDocumentReport: (docId) => request(`/documents/${encodeURIComponent(docId)}/report`),
 };
 
 export function isApiUnavailable(error) {
