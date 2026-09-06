@@ -1,99 +1,92 @@
 # Sakshya backend API
 
-The service persists evidence metadata and audit events in local SQLite (`data/sakshya.sqlite` by default), so records survive server restarts. Use `SAKSHYA_DB_PATH` to set a different database path. Raw uploaded file bytes are never stored; the service retains only the file metadata and SHA-256 digest. Every audit entry contains the preceding entry's hash and its own SHA-256 hash, forming a cryptographically linked audit chain.
+Base URL: `http://localhost:5000`. Evidence metadata and audit events are persisted in SQLite; raw uploaded bytes are never stored. Evidence has SHA-256 original/current hashes and a cryptographically linked audit chain.
 
-Base URL: `http://localhost:5000`
+## Authentication and demo roles
 
-## `GET /api/health`
+`POST /api/auth/login` accepts `{ "username", "password" }` and returns an eight-hour signed Bearer session token. Passwords are salted scrypt hashes in SQLite; plaintext passwords are never stored. Send `Authorization: Bearer <token>` to protected endpoints. `GET /api/auth/me` returns the authenticated officer.
 
-Returns service status, the configured upload limit, and the seeded document count.
+Demo-only credentials (replace or disable for deployment):
 
-## Frontend-compatible custody routes
+| Role | Username | Password |
+| --- | --- | --- |
+| Investigating Officer | `investigator` | `demo-investigator-2026` |
+| Forensic Analyst | `analyst` | `demo-analyst-2026` |
+| Senior Authority | `authority` | `demo-authority-2026` |
+| Court Viewer | `court` | `demo-court-2026` |
+| System Admin | `admin` | `demo-admin-2026` |
 
-These routes are used by the React command centre:
+Role policy: Investigating Officers upload and can read their assigned evidence; Forensic Analysts verify and produce reports; Court Viewers have verification/report-only access; Senior Authorities review incidents, approve sensitive actions and run demo tamper; System Admin manages users/devices and has no endpoint to alter evidence history. Every authenticated evidence action records the actor, badge and role in the audit chain.
 
-- `GET /api/documents` — list all records with `valid`/`compromised` status.
-- `POST /api/documents/upload` — register JSON metadata without a file.
-- `GET /api/documents/:id/chain` — return the full chronological chain.
-- `POST /api/documents/:id/verify` — verify and append an integrity event.
-- `POST /api/documents/:id/action` — append `VIEWED`, `EDITED`, or `COURT_ACCESSED`.
-- `POST /api/documents/:id/simulate-tamper` — demo-only block mutation.
-- `POST /api/documents/:id/reset-demo` — restore the pre-demo baseline.
-- `GET /api/documents/:id/report` — return a court-ready JSON report.
+## Evidence and document routes
 
-For `TRANSFERRED`, the action body must include `fromOfficer`, `toOfficer`, `fromOtp`, and `toOtp`; both OTP values are any four-digit demo strings. An invalid dual confirmation is blocked with `403`, creates an `OPEN` `INVALID_TRANSFER_OTP` security incident, and returns the refreshed evidence record in `evidence`.
+All routes below require a Bearer token unless noted.
 
-## `POST /api/evidence/upload`
+- `GET /api/health` — public health and storage status.
+- `GET /api/documents` — list evidence visible to the role.
+- `POST /api/documents/upload` — Investigating Officer JSON intake. Existing frontend-compatible route.
+- `GET /api/documents/:id/chain` — chronological audit chain.
+- `POST /api/documents/:id/verify` — Forensic Analyst or Court Viewer integrity verification.
+- `POST /api/documents/:id/action` — Investigating Officer/Senior Authority custody actions; transfer requires four-digit `fromOtp` and `toOtp`.
+- `POST /api/documents/:id/simulate-tamper` — Senior Authority demo-only tamper simulation.
+- `GET /api/documents/:id/report` — Forensic Analyst, Senior Authority or Court Viewer court-ready JSON report.
+- `POST /api/evidence/upload` — Investigating Officer multipart upload using field `file`; 25 MB limit.
+- `GET /api/evidence/:id` — evidence metadata and audit timeline.
+- `POST /api/evidence/:id/verify` — Forensic Analyst or Court Viewer verification.
+- `POST /api/evidence/:id/transfer/request-otp` — Investigating Officer/Senior Authority; demo response includes a five-minute OTP.
+- `POST /api/evidence/:id/transfer` — completes OTP custody transfer.
+- `POST /api/evidence/:id/tamper` — Senior Authority demo-only tamper simulation.
+- `GET /api/evidence/:id/report` — court-ready forensic report.
+- `GET /api/evidence/:id/incidents` — Senior Authority security-incident review.
+- `POST /api/evidence/:id/incidents/:incidentId/approve` — Senior Authority approval; appends an audit event.
 
-Uploads one file as multipart form data. The form field must be named `file`. Files larger than 25 MB receive `413` with a clear error.
+Invalid transfer OTPs are blocked with `401`/ `403`, create persistent `OPEN` `INVALID_TRANSFER_OTP` incidents, append a linked audit event with authenticated actor context, and return the refreshed evidence record.
 
-```bash
-curl -F "file=@evidence.pdf" http://localhost:5000/api/evidence/upload
-```
+## Administration
 
-Returns `201` and stores the evidence metadata, SHA-256 hashes, anomaly flags, and audit timeline in SQLite. The uploaded file contents are not persisted.
+System Admin only:
 
-Optional multipart or JSON provenance fields are `officerName`, `officerBadge`, `officerRole`, `attestationStatement`, `sourceSystemDeviceId`, `sourceType` (`CCTV/DVR`, `forensic lab`, `mobile capture`, `document system`, or `manual upload`), `officialSourceHash`, `sourceSignatureReference`, and `authorisedActionLocation`.
+- `GET /api/admin/users`
+- `POST /api/admin/users` with username, password (minimum 12 characters), name, badge and role
+- `GET /api/admin/devices`
+- `POST /api/admin/devices` with a device label
 
-Each response includes `provenance` with a status of `SOURCE_VERIFIED`, `SOURCE_UNKNOWN`, or `REVIEW_REQUIRED` and explainable flags. A source is marked `SOURCE_VERIFIED` only when non-manual source identity and trusted source hash/signature evidence are provided without flags. The service does not claim to detect every edit made before upload.
+Administration is deliberately separate from evidence mutation, so an administrator cannot alter evidence history.
 
-## `GET /api/evidence/:id`
+## Provenance, anomalies and report fields
 
-Returns the current evidence record and its audit timeline (newest first).
+Upload supports `officerName`, `officerBadge`, `officerRole`, `attestationStatement`, `sourceSystemDeviceId`, `sourceType`, `officialSourceHash`, `sourceSignatureReference`, and `authorisedActionLocation`. Responses and reports include provenance status/flags, security incidents, integrity status, and anomaly flags: `offHoursActivity`, `hashMismatch`, `brokenAuditChain`, and `intrusionAttempt`.
 
-## Persistent storage
+Source provenance is an honest assessment, not a claim to detect every pre-upload edit. Incident metadata is authorised investigation context only: it does not automatically identify a person or perform GPS tracking.
 
-`evidence_records` stores evidence metadata, hashes, custody state, and temporary OTP transfer state. `audit_events` stores the append-only cryptographically linked timeline. The SQLite database and its WAL/SHM files are ignored by Git.
+## Errors
 
-## `POST /api/evidence/:id/verify`
+`400` invalid request, `401` missing/invalid session or OTP, `403` role or transfer denial, `404` missing evidence, `409` duplicate data, and `413` files over 25 MB.
 
-Verifies that the current evidence hash still equals the original SHA-256 hash and that every audit event correctly links to its predecessor. It creates an `Integrity verified` audit event and returns `valid`.
+## Final security extensions
 
-## `POST /api/evidence/:id/transfer/request-otp`
+### Registered source devices
 
-Starts an OTP-protected custody transfer. Send JSON:
+System Admin endpoints: `GET /api/admin/source-devices`, `POST /api/admin/source-devices`, and `PATCH /api/admin/source-devices/:id`. A source device has an ID, supported type (`CCTV/DVR`, `forensic lab`, `mobile capture`, or `document system`), organisation/unit, ACTIVE/INACTIVE state and optional trusted hash/signature reference. Upload provenance checks the registry. Unknown, inactive, or reference-mismatched devices create review flags and cannot become falsely source-verified.
 
-```json
-{ "recipient": "Investigating Officer" }
-```
+### Network-origin traceability and incidents
 
-The OTP is valid for five minutes. This self-contained demo returns the OTP in its response; a production deployment must deliver it out of band.
+Sensitive actions, blocked OTP attempts, QR lookups and offline syncs persist source IP, user-agent/device context, timestamp, evidence ID and authenticated actor where available in `network_events`. Responses call this **“Approximate network-origin context for lawful authorised investigation.”** Private addresses are reported as local/private context. No external geolocation provider is configured, so the backend does not infer GPS, city, ISP, VPN status, or a person's identity.
 
-## `POST /api/evidence/:id/transfer`
+Senior Authority can update an incident using `POST /api/evidence/:id/incidents/:incidentId/status` with `status` (`UNDER_REVIEW`, `RESOLVED`, or `DISMISSED`) and a required `reason`. The original incident facts remain preserved; the reviewer, time, decision and reason are added separately and audited.
 
-Completes a custody transfer only after OTP verification. Send JSON:
+### Rule-based risk and court verification
 
-```json
-{ "recipient": "Investigating Officer", "otp": "123456" }
-```
+Evidence and reports expose `riskScore`: a deterministic, explainable 0–100 score, risk band and reasons. It is rule-based, not machine learning. Inputs include hash/audit failure, provenance review, source-device flags, invalid OTP incidents, unresolved incidents and off-hours activity.
 
-The OTP is single-use. Invalid, expired, or mismatched OTPs return clear `400` or `401` errors. An invalid OTP is blocked, creates a persistent `OPEN` `INVALID_TRANSFER_OTP` security incident, and returns the refreshed evidence record in `evidence`.
+`POST /api/evidence/:id/verification-token` creates a revocable, expiring, unguessable court-verification token (Forensic Analyst/Senior Authority). `GET /api/public/verify/:token` is read-only and public-safe: it returns only evidence ID, case ID, integrity verdict and expiry. `POST /api/evidence/:id/verification-token/:token/revoke` revokes a token (Senior Authority). `GET /api/evidence/:id/report.pdf` returns a simple local, court-friendly PDF summary. It contains no raw uploaded bytes.
 
-## `POST /api/evidence/:id/tamper`
+### Physical QR evidence twins
 
-Demo-only endpoint that intentionally changes the current evidence hash and records the simulated integrity breach. A subsequent verification must fail.
+`POST /api/physical-tags` creates a persistent physical tag mapping (Investigating Officer/System Admin) with physical tag ID, evidence ID, seal/package identifier and location. `GET /api/physical-tags` lists authorised mappings; `GET /api/physical-tags/:tag` performs an authorised read-safe lookup and records the lookup in the evidence audit chain.
 
-## `GET /api/evidence/:id/report`
+### Offline sync and Hindi voice parsing
 
-Produces a court-ready JSON forensic report containing the evidence metadata, hashes, full linked audit timeline, integrity assessment, custody holder, and anomaly flags.
+`POST /api/evidence/:id/sync-actions` accepts `actions` with `actionId`, `actionType` (`VIEWED` or `COURT_ACCESSED`) and monotonically increasing `sequenceNumber`. It is authenticated, idempotent, and returns `ACCEPTED`, `DUPLICATE`, `CONFLICT`, or `REVIEW_REQUIRED`; offline clients are not inherently trusted.
 
-## Anomaly flags
-
-Each record and report expose these booleans:
-
-- `offHoursActivity`: at least one audit event occurred between 20:00 and 05:59 UTC.
-- `hashMismatch`: the current evidence hash differs from the original SHA-256 hash.
-- `brokenAuditChain`: an audit entry's previous hash or event hash no longer verifies.
-- `intrusionAttempt`: one or more blocked invalid-transfer incidents exist.
-
-## Security incidents
-
-Every evidence record and forensic report includes `securityIncidents`. For blocked invalid transfers, each incident records a unique ID, rule, attempted action, summary, timestamp, source network, browser/device context, and an action location only if the client voluntarily sends one. This is authorised investigation context only; it does not identify a person automatically or perform GPS tracking.
-
-## Source provenance
-
-Forensic reports also include the persisted provenance result and its flags. Typical flags include `unregistered source device`, `source hash unavailable`, `source hash mismatch`, `missing uploader attestation`, and `upload outside authorised location`. These flags are source-assessment context, not a claim that the system can identify a person or reconstruct every pre-upload edit.
-
-## Common errors
-
-`404` is returned for an unknown evidence ID, `400` for invalid requests, `401` for an invalid OTP, `413` for files above 25 MB, and `500` for unexpected server errors.
+`POST /api/voice/parse` accepts `{ "text" }` and supports safe, narrow Hindi phrases such as “Case 102 ki evidence verify karo” and “Evidence DOC-2026-001 ka report kholo”. It returns intent and normal-role confirmation requirements only; it never executes irreversible or sensitive actions.
