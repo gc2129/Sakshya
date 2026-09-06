@@ -1,537 +1,730 @@
-import { Component, useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
-import Joyride from 'react-joyride';
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
-  BarChart3,
   BadgeCheck,
-  Building2,
+  Bell,
   Check,
   CheckCircle2,
-  ChevronDown,
-  CircleDot,
-  ClipboardCheck,
+  ChevronRight,
+  CircleAlert,
   Clock3,
-  Code2,
   Copy,
+  Database,
   Download,
   Eye,
   FileCheck2,
-  FileJson,
+  FileClock,
   FilePlus2,
   FileText,
   Fingerprint,
+  FolderOpen,
   Info,
   KeyRound,
+  Landmark,
+  LayoutDashboard,
   Link2,
   LoaderCircle,
   LockKeyhole,
-  MapPin,
-  MoreHorizontal,
+  Menu,
+  Moon,
   Network,
-  Printer,
-  QrCode,
   RefreshCw,
-  ScanLine,
+  RotateCcw,
   Search,
   Send,
   ShieldAlert,
   ShieldCheck,
-  Terminal,
+  Sun,
   UploadCloud,
-  UserCheck,
-  Users,
+  UserRound,
   X,
-  Zap,
 } from 'lucide-react';
 import { api, isApiUnavailable } from './lib/api';
-import { activityFeed, anomalyEvents, chartData, cloneDocuments, documentFromApi, officers } from './data/mockData';
-import { AppShell } from './components/Shell';
-import {
-  EmptyState,
-  HashChainVisualizer,
-  HashChip,
-  IntegrityMeter,
-  LoadingSkeleton,
-  Modal,
-  PageHeader,
-  RiskBadge,
-  SectionEyebrow,
-  StatsCard,
-  StatusBadge,
-  TimelineComponent,
-  VerificationResult,
-  cn,
-  formatShortTime,
-  formatTime,
-  motionProps,
-  relativeTime,
-  shortHash,
-} from './components/ui';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-function verifyLocalChain(document) {
-  const brokenAtIndex = document?.chain?.findIndex((entry) => entry.compromised || entry.verified === false) ?? -1;
-  const valid = brokenAtIndex === -1;
-  return {
-    valid,
-    brokenAtIndex: valid ? null : brokenAtIndex,
-    details: valid ? `All ${document?.chain?.length || 0} custody blocks match their linked SHA-256 fingerprints.` : `Block ${brokenAtIndex} does not match its recorded fingerprint. All downstream links require review.`,
-  };
+const VIEW_TO_HASH = {
+  overview: 'dashboard',
+  upload: 'upload',
+  integrity: 'verify',
+  transfer: 'transfer',
+  report: 'report',
+};
+
+const HASH_TO_VIEW = {
+  dashboard: 'overview',
+  overview: 'overview',
+  upload: 'upload',
+  verify: 'integrity',
+  integrity: 'integrity',
+  demo: 'integrity',
+  transfer: 'transfer',
+  report: 'report',
+  reports: 'report',
+};
+
+const NAV_ITEMS = [
+  { id: 'overview', label: 'Command centre', hint: 'Live register & posture', icon: LayoutDashboard },
+  { id: 'upload', label: 'Seal evidence', hint: 'Register a new file', icon: UploadCloud },
+  { id: 'integrity', label: 'Verify integrity', hint: 'Hash & custody chain', icon: Fingerprint },
+  { id: 'transfer', label: 'Transfer custody', hint: 'OTP-protected handover', icon: ArrowLeftRight },
+  { id: 'report', label: 'Forensic report', hint: 'Court-ready evidence pack', icon: FileCheck2 },
+];
+
+const ACTION_ICONS = {
+  UPLOADED: UploadCloud,
+  VIEWED: Eye,
+  TRANSFERRED: ArrowLeftRight,
+  EDITED: FileText,
+  COURT_ACCESSED: Landmark,
+  VERIFIED: ShieldCheck,
+};
+
+const ACTION_LABELS = {
+  UPLOADED: 'Evidence uploaded',
+  VIEWED: 'Evidence viewed',
+  TRANSFERRED: 'Custody transferred',
+  EDITED: 'Evidence edited',
+  COURT_ACCESSED: 'Court access granted',
+  VERIFIED: 'Integrity verified',
+};
+
+function resolveInitialView() {
+  const hash = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+  return HASH_TO_VIEW[hash] || 'overview';
 }
 
-function createLocalDocument(payload) {
-  const timestamp = new Date().toISOString();
-  const id = payload.docId || `DOC-2026-${String(Math.floor(10000 + Math.random() * 89999))}`;
-  const digest = `sha256:${Array.from({ length: 64 }, (_, index) => '0123456789abcdef'[(index + id.length) % 16]).join('')}`;
-  return {
-    id,
-    docId: id,
-    caseId: payload.caseId || 'CASE/UNASSIGNED',
-    name: payload.file?.name || `${id}_evidence_record`,
-    description: payload.description || 'Evidence record sealed from SAKSHYA command centre.',
-    evidenceType: payload.evidenceType || 'Digital Document',
-    classification: payload.classification || 'Sensitive',
-    size: payload.file ? `${(payload.file.size / 1024 / 1024).toFixed(1)} MB` : '—',
-    status: 'valid',
-    chainLength: 1,
-    lastActivity: timestamp,
-    chain: [{ index: 0, action: 'UPLOADED', officer: payload.officerName || 'Rajiv Menon', badge: payload.officerBadge || 'MHA-001', role: 'Senior Authority', timestamp, details: payload.description || 'Evidence package sealed and registered against the case file.', hash: digest, previousHash: 'GENESIS', verified: true, location: 'National Evidence Grid · Intake' }],
-  };
+function setHash(view) {
+  const nextHash = `#/${VIEW_TO_HASH[view] || 'dashboard'}`;
+  if (window.location.hash !== nextHash) window.location.hash = nextHash;
+}
+
+function formatSize(value) {
+  if (typeof value === 'string') return value;
+  if (!Number.isFinite(Number(value))) return '—';
+  const bytes = Number(value);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatDate(value, includeSeconds = false) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: includeSeconds ? 'medium' : 'short',
+  }).format(date);
+}
+
+function relativeTime(value) {
+  if (!value) return '—';
+  const delta = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(delta / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function greetingForCurrentHour() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function shortHash(value, length = 10) {
+  if (!value) return '—';
+  const raw = String(value).replace(/^sha256:/i, '');
+  if (raw.length <= length * 2) return raw;
+  return `${raw.slice(0, length)}…${raw.slice(-8)}`;
+}
+
+function recordStatus(record, verification) {
+  if (verification?.valid === false || record?.valid === false || record?.status === 'compromised' || record?.tampered) return 'compromised';
+  if (verification?.valid === true) return 'verified';
+  return 'sealed';
+}
+
+function actionLabel(action) {
+  return ACTION_LABELS[action] || action || 'Custody event';
+}
+
+function initials(value) {
+  return String(value || 'SAKSHYA')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+async function copyText(value) {
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function App() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('sakshya-theme') || 'light');
-  const [highContrast, setHighContrast] = useState(() => window.localStorage.getItem('sakshya-contrast') === 'true');
-  const [documents, setDocuments] = useState(() => cloneDocuments());
-  const [apiOnline, setApiOnline] = useState(false);
-  const [lastSync, setLastSync] = useState(new Date());
+  const [activeView, setActiveView] = useState(resolveInitialView);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [health, setHealth] = useState({ state: 'checking', data: null, error: null });
+  const [records, setRecords] = useState([]);
+  const [evidence, setEvidence] = useState(null);
+  const [verification, setVerification] = useState(null);
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState({});
+  const [globalError, setGlobalError] = useState('');
+  const [lastSync, setLastSync] = useState(null);
+  const [lastOperation, setLastOperation] = useState(null);
+  const [search, setSearch] = useState('');
+  const evidenceRef = useRef(null);
+
+  const [uploadForm, setUploadForm] = useState({ caseId: '', officer: '', description: '', classification: 'Sensitive', file: null });
+  const [uploadErrors, setUploadErrors] = useState({});
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [transferForm, setTransferForm] = useState({ recipient: '', otp: '' });
+  const [otpChallenge, setOtpChallenge] = useState(null);
 
   useEffect(() => {
     window.localStorage.setItem('sakshya-theme', theme);
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem('sakshya-contrast', String(highContrast));
-  }, [highContrast]);
-
-  useEffect(() => {
-    let active = true;
-    async function sync() {
-      try {
-        await api.getHealth();
-        if (active) setApiOnline(true);
-      } catch {
-        if (active) setApiOnline(false);
-      }
-      try {
-        const remote = await api.getAllDocuments();
-        const list = Array.isArray(remote) ? remote : remote?.documents;
-        if (active && Array.isArray(list) && list.length) {
-          setDocuments((current) => {
-            const mapped = list.map(documentFromApi).filter(Boolean);
-            return mapped.length ? mapped : current;
-          });
-        }
-      } catch {
-        // The prototype keeps a seeded presentation dataset when the optional API list is unavailable.
-      }
-      if (active) setLastSync(new Date());
-    }
-    sync();
-    const interval = window.setInterval(sync, 5000);
-    return () => { active = false; window.clearInterval(interval); };
+    const onHashChange = () => setActiveView(resolveInitialView());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  async function uploadDocument(payload) {
-    let created = null;
+  const markBusy = useCallback((key, value) => {
+    setBusy((current) => ({ ...current, [key]: value }));
+  }, []);
+
+  const mergeEvidence = useCallback((record, select = true) => {
+    if (!record?.id) return;
+    setRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+    if (select) {
+      evidenceRef.current = record;
+      setEvidence(record);
+    }
+  }, []);
+
+  const syncLiveData = useCallback(async () => {
     try {
-      const remote = await api.uploadDocument(payload);
-      created = documentFromApi(remote);
+      const healthResult = await api.getHealth();
+      if (healthResult?.ok !== true) {
+        throw new Error('SAKSHYA backend health check did not return an online state.');
+      }
+      const list = await api.listEvidence();
+      const nextRecords = Array.isArray(list) ? list : [];
+      if (evidenceRef.current?.id) {
+        const selected = await api.getEvidence(evidenceRef.current.id);
+        evidenceRef.current = selected;
+        setEvidence(selected);
+      }
+      setHealth({ state: 'online', data: healthResult, error: null });
+      setRecords(nextRecords);
+      setLastSync(new Date());
     } catch (error) {
-      if (!isApiUnavailable(error)) toast('API route unavailable — sealed in demo workspace.', { icon: '◌' });
+      // Never leave a disconnected production workspace looking live. The
+      // next successful poll repopulates the register from the backend.
+      evidenceRef.current = null;
+      setEvidence(null);
+      setRecords([]);
+      setVerification(null);
+      setReport(null);
+      setHealth({
+        state: 'offline',
+        data: null,
+        error: isApiUnavailable(error)
+          ? 'The SAKSHYA backend is unavailable. Live records are hidden until the connection returns.'
+          : error.message,
+      });
     }
-    created ||= createLocalDocument(payload);
-    setDocuments((current) => [created, ...current]);
-    return created;
-  }
-
-  async function addAction(docId, actionData) {
-    const current = documents.find((document) => document.docId === docId);
-    if (!current) throw new Error('Document not found.');
-    const previous = current.chain.at(-1)?.hash || 'GENESIS';
-    const nextIndex = current.chain.length;
-    const nextHash = `sha256:${Array.from({ length: 64 }, (_, index) => 'abcdef0123456789'[(index + nextIndex + actionData.action.length) % 16]).join('')}`;
-    const entry = { index: nextIndex, action: actionData.action, officer: actionData.officerName || 'Rajiv Menon', badge: actionData.officerBadge || 'MHA-001', role: actionData.role || 'Authorised Officer', timestamp: new Date().toISOString(), details: actionData.details || 'Custody action recorded.', hash: nextHash, previousHash: previous, verified: true, location: actionData.location || 'Registered evidence facility' };
-    setDocuments((currentDocuments) => currentDocuments.map((document) => document.docId === docId ? { ...document, chain: [...document.chain, entry], chainLength: document.chain.length + 1, lastActivity: entry.timestamp } : document));
-    try { await api.addAction(docId, actionData); } catch { /* Demo state remains usable against the repository's minimal backend. */ }
-    return entry;
-  }
-
-  async function verifyDocument(docId) {
-    const document = documents.find((item) => item.docId === docId);
-    if (!document) return { valid: false, details: 'Document not found.' };
-    try { await api.verifyChain(docId); } catch { /* Local verification keeps the judge flow deterministic. */ }
-    const result = verifyLocalChain(document);
-    setDocuments((current) => current.map((item) => item.docId === docId ? { ...item, status: result.valid ? 'valid' : 'compromised' } : item));
-    return result;
-  }
-
-  async function tamperDocument(docId, blockIndex, fakeData) {
-    const document = documents.find((item) => item.docId === docId);
-    if (!document) throw new Error('Document not found.');
-    setDocuments((current) => current.map((item) => {
-      if (item.docId !== docId) return item;
-      return { ...item, status: 'compromised', chain: item.chain.map((entry, index) => index >= blockIndex ? { ...entry, verified: false, compromised: true, details: index === blockIndex ? fakeData : `${entry.details} · Downstream link requires review.` } : entry) };
-    }));
-    try { await api.simulateTamper(docId, blockIndex, fakeData); } catch { /* This is an intentional local demo action. */ }
-  }
-
-  function restoreDocument(docId, baseline) {
-    setDocuments((current) => current.map((item) => item.docId === docId ? { ...item, status: 'valid', chain: JSON.parse(JSON.stringify(baseline)), chainLength: baseline.length } : item));
-  }
-
-  return <BrowserRouter><Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} /><AppErrorBoundary><AppShell theme={theme} onThemeChange={setTheme} highContrast={highContrast} onContrastChange={() => setHighContrast((value) => !value)} apiOnline={apiOnline}><Routes><Route path="/" element={<LandingPage documents={documents} />} /><Route path="/dashboard" element={<DashboardPage documents={documents} onRefresh={() => setLastSync(new Date())} lastSync={lastSync} />} /><Route path="/document/:docId" element={<DocumentDetailPage documents={documents} onAddAction={addAction} onVerify={verifyDocument} onTamper={tamperDocument} />} /><Route path="/upload" element={<UploadPage onUpload={uploadDocument} />} /><Route path="/verify" element={<VerifyPage documents={documents} onVerify={verifyDocument} />} /><Route path="/demo" element={<DemoPage documents={documents} onTamper={tamperDocument} onRestore={restoreDocument} />} /><Route path="/transfer" element={<TransferPage documents={documents} onAddAction={addAction} />} /><Route path="/anomalies" element={<AnomaliesPage documents={documents} />} /><Route path="/reports" element={<ReportsPage documents={documents} />} /><Route path="/admin" element={<AdminPage documents={documents} />} /><Route path="*" element={<NotFoundPage />} /></Routes></AppShell></AppErrorBoundary></BrowserRouter>;
-}
-
-function LandingPage({ documents }) {
-  const valid = documents.filter((document) => document.status === 'valid').length;
-  const compromised = documents.filter((document) => document.status === 'compromised').length;
-  const leadDocument = documents[0];
-  return <div className="landing-page">
-    <motion.section className="landing-hero" {...motionProps(0.03)}>
-      <div className="landing-hero__copy"><div className="hero-official"><span className="hero-official__line" /><span>Government of India · Ministry of Home Affairs</span></div><h1>Custody you can <span>prove.</span></h1><p className="landing-hero__lead">SAKSHYA is a secure digital evidence and document custody grid that turns every handover, review and court access into a verifiable chain of record.</p><div className="hero-actions"><Link to="/dashboard" className="button button--primary">Open command centre <ArrowRight size={16} /></Link><Link to="/demo" className="button button--ghost">See the tamper demo <Network size={16} /></Link></div><div className="hero-trust"><span><ShieldCheck size={14} /> SHA-256 linked records</span><span><LockKeyhole size={14} /> Restricted access control</span><span><BadgeCheck size={14} /> Court-ready audit trail</span></div></div>
-      <div className="landing-hero__visual"><div className="hero-grid-lines" /><div className="hero-orbit hero-orbit--one" /><div className="hero-orbit hero-orbit--two" /><div className="hero-node hero-node--main"><div className="hero-node__top"><span className="hero-node__signal"><span /> LIVE INTEGRITY ENGINE</span><Fingerprint size={24} /></div><strong>Evidence<br />remains intact.</strong><div className="hero-node__footer"><span>chain state</span><StatusBadge status="verified" label="VERIFIED" pulse /></div></div><div className="hero-mini-node hero-mini-node--a"><span>BLOCK 04</span><code>{shortHash(leadDocument?.chain?.at(-1)?.hash)}</code></div><div className="hero-mini-node hero-mini-node--b"><span>HASH LINK</span><Link2 size={15} /></div><div className="hero-connector hero-connector--a" /><div className="hero-connector hero-connector--b" /></div>
-    </motion.section>
-    <section className="landing-stats"><div><span className="landing-stats__value">{documents.length || 0}</span><span className="landing-stats__label">Evidence records</span></div><div><span className="landing-stats__value">{valid}</span><span className="landing-stats__label">Verified chains</span></div><div className={compromised ? 'landing-stats__alert' : ''}><span className="landing-stats__value">{compromised}</span><span className="landing-stats__label">Compromised</span></div><div><span className="landing-stats__value">99.98%</span><span className="landing-stats__label">Grid availability</span></div></section>
-    <section className="landing-section"><div className="landing-section__heading"><div><SectionEyebrow icon={Activity}>WHY SAKSHYA</SectionEyebrow><h2>Evidence history that stands up to scrutiny.</h2></div><p>Built for the operational reality of law enforcement and the evidentiary standards of the judiciary.</p></div><div className="landing-feature-grid"><FeatureCard icon={Fingerprint} number="01" title="Seal once. Verify forever." text="Each custody event is linked to the previous record using a SHA-256 fingerprint, making unauthorised changes mathematically visible." /><FeatureCard icon={Users} number="02" title="Accountability at every handover." text="Officer identity, badge, location and time are recorded together so responsibility never gets lost between departments." /><FeatureCard icon={FileCheck2} number="03" title="Court-ready by design." text="Generate an official report with signatures, timestamps and cryptographic proof for judicial review." /></div></section>
-    <section className="landing-chain-section"><div className="landing-section__heading"><div><SectionEyebrow icon={Network}>LIVE SYSTEM MODEL</SectionEyebrow><h2>A transparent chain for an invisible guarantee.</h2></div><Link to="/document/DOC-2026-00217" className="text-link">Explore a custody record <ArrowUpRight size={15} /></Link></div><HashChainVisualizer chain={leadDocument?.chain?.slice(0, 4) || []} compact /></section>
-    <div className="landing-cta"><div><SectionEyebrow icon={Building2}>NATIONAL EVIDENCE GRID</SectionEyebrow><h2>Make every record defensible.</h2><p>SAKSHYA is a Smart India Hackathon 2026 prototype for SIH26190 · Ministry of Home Affairs.</p></div><Link to="/upload" className="button button--light">Seal new evidence <FilePlus2 size={16} /></Link></div>
-  </div>;
-}
-
-function FeatureCard({ icon: Icon, number, title, text }) {
-  return <motion.article className="feature-card" {...motionProps(Number(number) * 0.04)}><div className="feature-card__top"><span className="feature-card__icon"><Icon size={19} /></span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><ArrowUpRight className="feature-card__arrow" size={17} /></motion.article>;
-}
-
-function DashboardPage({ documents, onRefresh, lastSync }) {
-  const [query, setQuery] = useState('');
-  const filtered = documents.filter((document) => `${document.docId} ${document.caseId} ${document.name} ${document.classification}`.toLowerCase().includes(query.toLowerCase()));
-  const validCount = documents.filter((document) => document.status === 'valid').length;
-  const compromisedCount = documents.filter((document) => document.status === 'compromised').length;
-  const totalBlocks = documents.reduce((sum, document) => sum + document.chain.length, 0);
-  return <div className="dashboard-page"><PageHeader eyebrow="OPERATIONS OVERVIEW" icon={LayoutIcon} title="Command centre" description="A live operational view of evidence custody across the secure grid." actions={<><button className="button button--secondary" type="button" onClick={() => { onRefresh(); toast.success('Evidence register refreshed.'); }}><RefreshCw size={15} />Refresh register</button><Link className="button button--primary" to="/upload"><FilePlus2 size={15} />Seal evidence</Link></>} /><section className="stats-grid"><StatsCard label="Documents in custody" value={documents.length.toString().padStart(2, '0')} helper={`${totalBlocks} linked custody blocks`} icon={FileCheck2} tone="navy" trend="+12.4%" /><StatsCard label="Verified chains" value={validCount.toString().padStart(2, '0')} helper="No broken links detected" icon={ShieldCheck} tone="teal" trend="+8.2%" /><StatsCard label="Anomaly alerts" value={compromisedCount.toString().padStart(2, '0')} helper={compromisedCount ? 'Immediate review required' : 'No active alerts'} icon={ShieldAlert} tone={compromisedCount ? 'amber' : 'slate'} trend={compromisedCount ? '+1 today' : 'Stable'} /><StatsCard label="Cases pending review" value="07" helper="Across 4 departments" icon={ClipboardCheck} tone="blue" trend="-3.1%" /></section><section className="dashboard-layout"><div className="panel panel--activity"><div className="panel-header"><div><SectionEyebrow icon={Activity}>AUDIT STREAM</SectionEyebrow><h2>Recent custody activity</h2></div><button className="icon-button" type="button" title="Activity options"><MoreHorizontal size={17} /></button></div><div className="activity-feed">{activityFeed.map((item, index) => <motion.article className="activity-item" key={`${item.subject}-${item.time}`} {...motionProps(index * 0.05)}><span className={cn('activity-item__icon', `activity-item__icon--${item.tone}`)}>{item.icon === 'alert' ? <ShieldAlert size={15} /> : item.icon === 'verified' ? <ShieldCheck size={15} /> : item.icon === 'transfer' ? <ArrowRight size={15} /> : item.icon === 'court' ? <Building2 size={15} /> : <Eye size={15} />}</span><div className="activity-item__content"><div><strong>{item.title}</strong><time>{relativeTime(item.time)}</time></div><span><code>{item.subject}</code> · {item.meta}</span></div></motion.article>)}</div><Link to="/dashboard" className="panel-footer-link">View complete audit stream <ArrowRight size={14} /></Link></div><div className="panel panel--posture"><div className="panel-header"><div><SectionEyebrow icon={BarChart3}>SYSTEM POSTURE</SectionEyebrow><h2>7-day custody volume</h2></div><span className="panel-period">Last 7 days <ChevronDown size={13} /></span></div><div className="chart-legend"><span><i className="legend-line legend-line--sealed" />sealed</span><span><i className="legend-line legend-line--verified" />verified</span><span><i className="legend-line legend-line--alert" />alerts</span></div><div className="dashboard-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 10, right: 4, left: -25, bottom: 0 }}><defs><linearGradient id="sealedFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2563eb" stopOpacity={0.2} /><stop offset="100%" stopColor="#2563eb" stopOpacity={0} /></linearGradient><linearGradient id="verifiedFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0f6e56" stopOpacity={0.18} /><stop offset="100%" stopColor="#0f6e56" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-subtle)" /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} /><YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} /><Tooltip contentStyle={{ border: '1px solid var(--border)', borderRadius: 7, background: 'var(--panel)', fontSize: 11 }} /><Area type="monotone" dataKey="sealed" stroke="#2563eb" strokeWidth={2} fill="url(#sealedFill)" /><Area type="monotone" dataKey="verified" stroke="#0f6e56" strokeWidth={2} fill="url(#verifiedFill)" /></AreaChart></ResponsiveContainer></div><div className="posture-foot"><span><span className="pulse-dot pulse-dot--green" />Integrity engine operational</span><span className="mono">synced {relativeTime(lastSync.toISOString())}</span></div></div></section><section className="register-section"><div className="section-toolbar"><div><SectionEyebrow icon={FileCheck2}>EVIDENCE REGISTER</SectionEyebrow><h2>All custody records <span>{documents.length}</span></h2></div><div className="register-tools"><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter by ID, case or name" /></label><button className="button button--secondary button--icon-only" type="button" title="Filter records"><MoreHorizontal size={17} /></button></div></div><div className="document-grid">{filtered.map((document, index) => <DocumentCard document={document} key={document.docId} index={index} />)}{!filtered.length && <EmptyState icon={Search} title="No records match" text="Try a document ID, case reference or classification." />}</div></section></div>;
-}
-
-function DocumentCard({ document, index = 0 }) {
-  return <motion.article className={cn('document-card', document.status === 'compromised' && 'document-card--compromised')} {...motionProps(0.04 + index * 0.04)}><div className="document-card__top"><div className="document-card__file-icon"><FileText size={19} /></div><StatusBadge status={document.status} /></div><div className="document-card__identity"><Link to={`/document/${document.docId}`}><h3>{document.docId}</h3></Link><p>{document.name}</p></div><div className="document-card__meta"><span><small>CASE REFERENCE</small><code>{document.caseId}</code></span><span><small>CLASSIFICATION</small><strong>{document.classification}</strong></span></div><div className="document-card__bottom"><span><Link2 size={13} /> {document.chain.length} blocks linked</span><span>{relativeTime(document.lastActivity)}</span><Link to={`/document/${document.docId}`} className="round-arrow" aria-label={`Open ${document.docId}`}><ArrowUpRight size={15} /></Link></div></motion.article>;
-}
-
-function LayoutIcon(props) {
-  return <Activity {...props} />;
-}
-
-function DocumentDetailPage({ documents, onAddAction, onVerify, onTamper }) {
-  const { docId } = useParams();
-  const document = documents.find((item) => item.docId === docId);
-  const navigate = useNavigate();
-  const [verifyBusy, setVerifyBusy] = useState(false);
-  const [result, setResult] = useState(document ? verifyLocalChain(document) : null);
-  const [actionOpen, setActionOpen] = useState(false);
-  const [tamperOpen, setTamperOpen] = useState(false);
-  const [actionForm, setActionForm] = useState({ action: 'VIEWED', officerName: 'Rajiv Menon', officerBadge: 'MHA-001', details: '' });
-  const [tamperForm, setTamperForm] = useState({ blockIndex: '2', fakeData: 'Description modified outside the authorised custody workflow.' });
-
-  useEffect(() => { if (document) setResult(verifyLocalChain(document)); }, [docId, document?.status, document?.chain.length]);
-  if (!document) return <NotFoundPage compact />;
-
-  async function verify() {
-    setVerifyBusy(true);
-    await wait(850);
-    const next = await onVerify(document.docId);
-    setResult(next);
-    setVerifyBusy(false);
-    toast[next.valid ? 'success' : 'error'](next.valid ? 'Custody chain verified.' : `Integrity break detected at block ${next.brokenAtIndex}.`);
-  }
-
-  async function submitAction(event) {
-    event.preventDefault();
-    await onAddAction(document.docId, actionForm);
-    setActionOpen(false);
-    setResult({ valid: true, details: 'New custody action appended and linked to the prior block.' });
-    setActionForm((current) => ({ ...current, details: '' }));
-    toast.success('Custody action appended to chain.');
-  }
-
-  async function submitTamper(event) {
-    event.preventDefault();
-    await onTamper(document.docId, Number(tamperForm.blockIndex), tamperForm.fakeData);
-    setTamperOpen(false);
-    setResult({ valid: false, brokenAtIndex: Number(tamperForm.blockIndex), details: `Block ${tamperForm.blockIndex} no longer matches its recorded fingerprint.` });
-    toast('Demo mutation applied. Verify the chain to see the break.', { icon: '⚠' });
-  }
-
-  return <div className="detail-page"><PageHeader eyebrow="CUSTODY RECORD" icon={FileCheck2} title={document.docId} description={`${document.name} · ${document.caseId}`} actions={<><button className="button button--secondary" type="button" onClick={() => setActionOpen(true)}><FilePlus2 size={15} />Add action</button><button className="button button--primary" type="button" onClick={verify} disabled={verifyBusy}>{verifyBusy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{verifyBusy ? 'Verifying…' : 'Verify chain'}</button><button className="button button--danger-ghost" type="button" onClick={() => setTamperOpen(true)}><Zap size={15} />Simulate tamper</button></>} /><div className="detail-summary"><div className="detail-summary__identity"><div className="document-hero-icon"><FileText size={24} /></div><div><span className="section-eyebrow">DOCUMENT ID</span><h2>{document.docId}</h2><div className="detail-summary__badges"><StatusBadge status={document.status} /><span className="classification-badge">{document.classification}</span><span className="classification-badge">{document.evidenceType}</span></div></div></div><div className="detail-summary__stats"><div><span>Case reference</span><strong>{document.caseId}</strong></div><div><span>Chain length</span><strong>{document.chain.length} blocks</strong></div><div><span>Last activity</span><strong>{relativeTime(document.lastActivity)}</strong></div></div></div><VerificationResult result={result} busy={verifyBusy} onVerify={verify} /><div className="detail-main-grid"><div><HashChainVisualizer chain={document.chain} /><section className="panel timeline-panel"><div className="panel-header"><div><SectionEyebrow icon={Clock3}>CUSTODY TIMELINE</SectionEyebrow><h2>Immutable activity record</h2></div><span className="panel-counter">{document.chain.length} events</span></div><TimelineComponent chain={document.chain} /></section></div><aside className="detail-aside"><section className="panel metadata-panel"><div className="panel-header"><div><SectionEyebrow icon={Info}>RECORD METADATA</SectionEyebrow><h2>Evidence profile</h2></div><button className="icon-button" type="button"><MoreHorizontal size={17} /></button></div><MetadataRow label="Description" value={document.description} /><MetadataRow label="Evidence type" value={document.evidenceType} /><MetadataRow label="File size" value={document.size} /><MetadataRow label="Registered at" value="National Evidence Grid" /><div className="metadata-divider" /><div className="metadata-seal"><ShieldCheck size={18} /><div><strong>Custody policy active</strong><span>Dual officer confirmation required for transfer.</span></div></div></section><section className="panel integrity-side-panel"><SectionEyebrow icon={Fingerprint}>INTEGRITY SUMMARY</SectionEyebrow><IntegrityMeter value={result?.valid ? 100 : 42} /><div className="integrity-side-row"><span>Root fingerprint</span><HashChip hash={document.chain[0]?.hash} /></div><div className="integrity-side-row"><span>Latest block</span><HashChip hash={document.chain.at(-1)?.hash} /></div><Link to={`/reports?doc=${document.docId}`} className="button button--secondary button--full"><FileText size={15} />Open forensic report</Link></section></aside></div>{actionOpen && <Modal title="Append custody action" eyebrow="CONTROLLED WRITE" onClose={() => setActionOpen(false)}><form className="modal-form" onSubmit={submitAction}><FormField label="Action type" required><select value={actionForm.action} onChange={(event) => setActionForm({ ...actionForm, action: event.target.value })}><option>VIEWED</option><option>TRANSFERRED</option><option>EDITED</option><option>COURT_ACCESSED</option></select></FormField><div className="form-grid form-grid--two"><FormField label="Officer name" required><input value={actionForm.officerName} onChange={(event) => setActionForm({ ...actionForm, officerName: event.target.value })} /></FormField><FormField label="Badge number" required><input value={actionForm.officerBadge} onChange={(event) => setActionForm({ ...actionForm, officerBadge: event.target.value })} /></FormField></div><FormField label="Action details" required><textarea value={actionForm.details} onChange={(event) => setActionForm({ ...actionForm, details: event.target.value })} placeholder="State why this action was performed…" required /></FormField><div className="modal-form__footer"><span><LockKeyhole size={14} /> This action becomes part of the signed record.</span><button className="button button--primary" type="submit">Append to chain <ArrowRight size={15} /></button></div></form></Modal>}{tamperOpen && <Modal title="Simulate tamper event" eyebrow="DEMO-ONLY CONTROL" onClose={() => setTamperOpen(false)}><form className="modal-form" onSubmit={submitTamper}><div className="warning-callout"><AlertTriangle size={17} /><div><strong>For demonstration purposes only</strong><p>This directly mutates a local block without recalculating its hash. Use Verify chain afterwards to show the mathematical break.</p></div></div><FormField label="Block to mutate" required><select value={tamperForm.blockIndex} onChange={(event) => setTamperForm({ ...tamperForm, blockIndex: event.target.value })}>{document.chain.map((entry) => <option key={entry.index} value={entry.index}>Block {String(entry.index).padStart(2, '0')} · {entry.action}</option>)}</select></FormField><FormField label="Injected fake data" required><textarea value={tamperForm.fakeData} onChange={(event) => setTamperForm({ ...tamperForm, fakeData: event.target.value })} required /></FormField><div className="modal-form__footer"><span className="text-danger"><ShieldAlert size={14} /> Chain will be marked compromised.</span><button className="button button--danger" type="submit">Apply demo mutation <Zap size={15} /></button></div></form></Modal>}</div>;
-}
-
-function MetadataRow({ label, value }) {
-  return <div className="metadata-row"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function FormField({ label, required, hint, children }) {
-  return <label className="form-field"><span>{label}{required && <i>*</i>}{hint && <small>{hint}</small>}</span>{children}</label>;
-}
-
-function UploadPage({ onUpload }) {
-  const [form, setForm] = useState({ docId: '', caseId: '', officerName: 'Rajiv Menon', officerBadge: 'MHA-001', description: '', evidenceType: 'Digital Document', classification: 'Sensitive' });
-  const [file, setFile] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [errors, setErrors] = useState({});
-  const [fingerprint, setFingerprint] = useState({ status: 'idle', progress: 0 });
-  const [busy, setBusy] = useState(false);
-  const [success, setSuccess] = useState(null);
-
-  function setField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
-    setErrors((current) => ({ ...current, [field]: '' }));
-  }
-
-  async function generateFingerprint() {
-    setFingerprint({ status: 'generating', progress: 4 });
-    for (let progress = 16; progress <= 100; progress += 12) {
-      await wait(85);
-      setFingerprint({ status: progress === 100 ? 'done' : 'generating', progress });
-    }
-  }
-
-  function selectFile(nextFile) {
-    if (!nextFile) return;
-    setFile(nextFile);
-    if (!form.docId) setField('docId', `DOC-2026-${String(Math.floor(10000 + Math.random() * 89999))}`);
-    setFingerprint({ status: 'idle', progress: 0 });
-  }
-
-  function validate() {
-    const next = {};
-    if (!form.docId.trim()) next.docId = 'Document ID is required.';
-    if (!form.caseId.trim()) next.caseId = 'Case reference is required.';
-    if (!form.officerName.trim()) next.officerName = 'Officer name is required.';
-    if (!form.officerBadge.trim()) next.officerBadge = 'Badge number is required.';
-    if (!form.description.trim()) next.description = 'Add a short description for the record.';
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  }
-
-  async function submit(event) {
-    event.preventDefault();
-    if (!validate()) { toast.error('Complete the required evidence metadata.'); return; }
-    setBusy(true);
-    if (fingerprint.status !== 'done') await generateFingerprint();
-    const document = await onUpload({ ...form, file });
-    setBusy(false);
-    setSuccess(document);
-    toast.success('Evidence sealed and registered.');
-  }
-
-  return <div className="upload-page"><PageHeader eyebrow="EVIDENCE INTAKE" icon={UploadCloud} title="Seal new evidence" description="Create a cryptographic root record before evidence enters the custody workflow." actions={<div className="secure-context"><LockKeyhole size={14} /><span>Controlled write · Senior Authority</span></div>} /><div className="upload-layout"><form className="panel upload-form" onSubmit={submit}><div className="panel-header"><div><SectionEyebrow icon={FilePlus2}>RECORD DETAILS</SectionEyebrow><h2>Evidence metadata</h2></div><span className="required-note"><i>*</i> required</span></div><div className="form-grid form-grid--two"><FormField label="Document ID" required hint="Unique custody reference"><div className="input-with-prefix"><span>SAK</span><input value={form.docId} onChange={(event) => setField('docId', event.target.value)} placeholder="DOC-2026-00218" /></div>{errors.docId && <small className="field-error">{errors.docId}</small>}</FormField><FormField label="Case reference" required><input value={form.caseId} onChange={(event) => setField('caseId', event.target.value)} placeholder="CASE/DEL/24-1188" />{errors.caseId && <small className="field-error">{errors.caseId}</small>}</FormField></div><div className="form-grid form-grid--two"><FormField label="Evidence type" required><select value={form.evidenceType} onChange={(event) => setField('evidenceType', event.target.value)}><option>Digital Document</option><option>Physical Item</option><option>Media Extract</option><option>Forensic Image</option></select></FormField><FormField label="Classification level" required><select value={form.classification} onChange={(event) => setField('classification', event.target.value)}><option>Normal</option><option>Sensitive</option><option>Classified</option></select></FormField></div><FormField label="Description" required hint="This description becomes part of the signed block"><textarea value={form.description} onChange={(event) => setField('description', event.target.value)} placeholder="Describe what this evidence contains and why it is being registered…" />{errors.description && <small className="field-error">{errors.description}</small>}</FormField><div className="form-divider" /><div className="panel-header panel-header--form"><div><SectionEyebrow icon={UserCheck}>REGISTERING OFFICER</SectionEyebrow><h2>Identity confirmation</h2></div><span className="verified-caption"><CheckCircle2 size={13} /> Session verified</span></div><div className="form-grid form-grid--two"><FormField label="Officer name" required><input value={form.officerName} onChange={(event) => setField('officerName', event.target.value)} />{errors.officerName && <small className="field-error">{errors.officerName}</small>}</FormField><FormField label="Badge / department ID" required><input value={form.officerBadge} onChange={(event) => setField('officerBadge', event.target.value)} />{errors.officerBadge && <small className="field-error">{errors.officerBadge}</small>}</FormField></div><div className="form-submit-row"><span><ShieldCheck size={14} /> Metadata will be sealed with the current timestamp.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <LockKeyhole size={15} />}{busy ? 'Sealing record…' : 'Seal & register evidence'}</button></div></form><aside className="upload-side"><section className="panel drop-panel"><div className="panel-header"><div><SectionEyebrow icon={FileText}>SOURCE PACKAGE</SectionEyebrow><h2>Attach evidence</h2></div><span className="optional-note">optional in demo</span></div><label className={cn('dropzone', dragging && 'dropzone--dragging')} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files?.[0]); }}><input type="file" onChange={(event) => selectFile(event.target.files?.[0])} /><span className="dropzone__icon"><UploadCloud size={24} /></span><strong>{file ? file.name : 'Drop a source package here'}</strong><span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ${file.type || 'application/octet-stream'}` : 'PDF, image, audio, video or forensic archive'}</span><small>Maximum prototype payload · 500 MB</small></label>{file && <div className="file-preview"><FileText size={16} /><div><strong>{file.name}</strong><span>Ready for fingerprinting</span></div><button className="icon-button" type="button" onClick={() => setFile(null)} aria-label="Remove attached file"><X size={15} /></button></div>}</section><section className="panel fingerprint-panel"><div className="panel-header"><div><SectionEyebrow icon={Fingerprint}>CRYPTOGRAPHIC FINGERPRINT</SectionEyebrow><h2>Root hash generation</h2></div><span className={cn('hash-state', `hash-state--${fingerprint.status}`)}>{fingerprint.status === 'done' ? 'COMPLETE' : fingerprint.status === 'generating' ? 'RUNNING' : 'READY'}</span></div><div className="fingerprint-workspace"><div className="fingerprint-graphic"><div className={cn('fingerprint-core', fingerprint.status === 'generating' && 'fingerprint-core--active', fingerprint.status === 'done' && 'fingerprint-core--done')}><Fingerprint size={29} /></div><span className="fingerprint-ring fingerprint-ring--one" /><span className="fingerprint-ring fingerprint-ring--two" /></div><div className="fingerprint-copy">{fingerprint.status === 'idle' && <><strong>Not generated yet</strong><p>Run the fingerprint engine to seal the metadata and source package.</p></>}{fingerprint.status === 'generating' && <><strong>Computing SHA-256…</strong><p>Normalising package bytes and linking to the case record.</p></>}{fingerprint.status === 'done' && <><strong>Fingerprint generated</strong><p className="mono">sha256:8f21c0b7…2ac901d4</p></>}</div></div><div className="fingerprint-progress"><span style={{ width: `${fingerprint.progress}%` }} /><small>{fingerprint.progress}%</small></div><button className="button button--secondary button--full" type="button" onClick={generateFingerprint} disabled={fingerprint.status === 'generating'}>{fingerprint.status === 'done' ? <><Check size={15} />Fingerprint confirmed</> : <><Fingerprint size={15} />Generate cryptographic fingerprint</>}</button></section></aside></div>{success && <Modal title="Evidence sealed successfully" eyebrow="CHAIN ROOT CREATED" onClose={() => setSuccess(null)}><div className="success-modal"><div className="success-modal__icon"><ShieldCheck size={30} /></div><h3>{success.docId}</h3><p>The evidence record is now the first verified block in a new chain of custody.</p><div className="success-modal__hash"><span>ROOT FINGERPRINT</span><HashChip hash={success.chain[0]?.hash} /></div><div className="success-modal__details"><span><strong>Case reference</strong>{success.caseId}</span><span><strong>Registered by</strong>{success.chain[0]?.officer}</span></div><div className="modal-form__footer"><Link to={`/document/${success.docId}`} className="button button--primary" onClick={() => setSuccess(null)}>Open custody record <ArrowRight size={15} /></Link><button className="button button--secondary" type="button" onClick={() => setSuccess(null)}>Seal another</button></div></div></Modal>}</div>;
-}
-
-function VerifyPage({ documents, onVerify }) {
-  const [selectedId, setSelectedId] = useState(documents[0]?.docId || '');
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const document = documents.find((item) => item.docId === selectedId);
-
-  async function runVerification() {
-    if (!document) return;
-    setBusy(true);
-    setResult(null);
-    setLogs([]);
-    const checks = ['Loading signed chain manifest', `Checking ${document.chain.length} block fingerprints`, 'Comparing previous-hash pointers', 'Validating officer and timestamp metadata', 'Writing verification result to audit stream'];
-    for (const [index, check] of checks.entries()) {
-      await wait(250);
-      setLogs((current) => [...current, { text: check, time: new Date().toISOString(), ok: index < 4 }]);
-    }
-    const next = await onVerify(selectedId);
-    setResult(next);
-    setBusy(false);
-    toast[next.valid ? 'success' : 'error'](next.valid ? 'Chain valid — all links verified.' : `Tampering detected at block ${next.brokenAtIndex}.`);
-  }
-
-  return <div className="verify-page"><PageHeader eyebrow="INTEGRITY VERIFICATION" icon={ShieldCheck} title="Chain verifier" description="Recompute the evidence history and confirm that no custody record has changed." actions={<Link to="/demo" className="button button--secondary"><Network size={15} />Open judge demo</Link>} /><div className="verify-layout"><section className="panel verify-control"><div className="panel-header"><div><SectionEyebrow icon={FileCheck2}>SELECT RECORD</SectionEyebrow><h2>Evidence to verify</h2></div><StatusBadge status="online" label="Engine ready" /></div><FormField label="Document or case record"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setResult(null); setLogs([]); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField>{document && <div className="verify-document-card"><div className="document-hero-icon"><FileText size={21} /></div><div><strong>{document.docId}</strong><span>{document.caseId}</span><small>{document.chain.length} linked blocks · {document.classification}</small></div><StatusBadge status={document.status} /></div>}<button className="button button--primary button--full verify-button" type="button" onClick={runVerification} disabled={busy || !document}>{busy ? <><LoaderCircle size={17} className="spin" />Verifying custody chain…</> : <><ShieldCheck size={17} />Verify chain integrity</>}</button><div className="verify-note"><Info size={14} /><span>The engine recomputes each block locally and compares its stored fingerprint with the linked previous hash.</span></div></section><section className="verify-result-column">{result || busy ? <VerificationResult result={result || { valid: true, details: 'Verification engine is checking every linked block.' }} busy={busy} /> : <div className="verify-placeholder"><div className="verify-placeholder__icon"><ShieldCheck size={34} /></div><h2>Ready to verify</h2><p>Select a record and run the integrity engine. The result will include the exact block where a chain diverges.</p></div>}<div className="panel verification-log"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>VERIFICATION LOG</SectionEyebrow><h2>Engine activity</h2></div><span className="mono">{logs.length}/{5} checks</span></div>{logs.length ? <div className="log-list">{logs.map((log, index) => <motion.div className="log-row" key={`${log.text}-${index}`} {...motionProps(index * 0.03)}><span className="log-row__icon"><Check size={13} /></span><div><strong>{log.text}</strong><span>{formatTime(log.time)}</span></div><code>PASS</code></motion.div>)}</div> : <EmptyState icon={Terminal} title="No verification run yet" text="Your cryptographic verification trace will appear here." />}</div></section></div>{result && !result.valid && <section className="panel broken-block-panel"><div className="broken-block-panel__icon"><AlertTriangle size={19} /></div><div><SectionEyebrow>EXCEPTION LOCATION</SectionEyebrow><h2>Broken link detected at block {String(result.brokenAtIndex).padStart(2, '0')}</h2><p>{result.details}</p></div><Link to={`/document/${selectedId}`} className="button button--danger-ghost">Inspect custody record <ArrowRight size={15} /></Link></section>}</div>;
-}
-
-function DemoPage({ documents, onTamper, onRestore }) {
-  const candidate = documents.find((item) => item.docId === 'DOC-2026-00217') || documents.find((item) => item.status === 'valid') || documents[0];
-  const [selectedId, setSelectedId] = useState(candidate?.docId || '');
-  const [baseline, setBaseline] = useState(() => JSON.parse(JSON.stringify(candidate?.chain || [])));
-  const [tampered, setTampered] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [tourRunning, setTourRunning] = useState(false);
-  const [comparison, setComparison] = useState(50);
-  const [logs, setLogs] = useState(['Demo workspace initialised', 'Baseline chain loaded from sealed record']);
-  const document = documents.find((item) => item.docId === selectedId) || candidate;
-  const afterChain = tampered ? document?.chain : baseline;
-  const afterResult = tampered ? verifyLocalChain({ chain: afterChain }) : { valid: true };
-  const tourSteps = [
-    { target: '#demo-record-select', content: 'Choose a sealed record. The demo keeps the explanation grounded in a real custody chain.', disableBeacon: true },
-    { target: '#demo-tamper-action', content: 'Trigger a controlled mutation. The block data changes without recalculating its fingerprint.', placement: 'bottom' },
-    { target: '#demo-before-card', content: 'Compare the original signed chain with the mutated chain. The first broken link is highlighted in red.', placement: 'top' },
-    { target: '#demo-terminal', content: 'Use this trace to explain how the integrity engine detects the divergence for a judge or evaluator.', placement: 'top' },
-  ];
+  }, []);
 
   useEffect(() => {
-    const next = documents.find((item) => item.docId === selectedId);
-    if (next && !tampered) setBaseline(JSON.parse(JSON.stringify(next.chain)));
-  }, [selectedId]);
+    syncLiveData();
+    const interval = window.setInterval(syncLiveData, 5000);
+    return () => window.clearInterval(interval);
+  }, [syncLiveData]);
 
-  async function simulate() {
-    if (!document) return;
-    setChecking(true);
-    setLogs((current) => [...current, `Mutating block 02 on ${document.docId}`]);
-    await onTamper(document.docId, Math.min(2, document.chain.length - 1), 'Injected demo value: custody description altered.');
-    await wait(360);
-    setTampered(true);
-    setLogs((current) => [...current, 'Fingerprint mismatch introduced', 'Ready to verify divergence']);
-    setChecking(false);
-    toast('Tamper simulation applied to local demo copy.', { icon: '⚠' });
-  }
+  const navigateView = useCallback((view) => {
+    setActiveView(view);
+    setMobileNavOpen(false);
+    setHash(view);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
-  function reset() {
-    if (!document) return;
-    onRestore(document.docId, baseline);
-    setTampered(false);
-    setLogs(['Demo workspace reset', 'Baseline hashes restored']);
-    toast.success('Demo chain restored to its intact state.');
-  }
+  const fail = useCallback((error, fallback) => {
+    const message = isApiUnavailable(error)
+      ? 'The SAKSHYA backend is unavailable. This action was not completed.'
+      : error?.message || fallback;
+    setGlobalError(message);
+    toast.error(message);
+  }, []);
 
-  return <div className="demo-page"><Joyride steps={tourSteps} run={tourRunning} continuous showProgress showSkipButton callback={(data) => { if (['finished', 'skipped'].includes(data.status)) setTourRunning(false); }} styles={{ options: { primaryColor: '#0a2540', zIndex: 120 } }} /><PageHeader eyebrow="DEMONSTRATION MODE" icon={Network} title="Show the proof" description="A controlled, visual walkthrough of how a hash chain exposes an unauthorised change." actions={<div className="demo-head-actions"><button className="button button--secondary" type="button" onClick={() => setTourRunning(true)}><Info size={15} />Guided tour</button><div className="demo-mode-badge"><span className="pulse-dot pulse-dot--amber" />Judge presentation mode</div></div>} /><section className="demo-command"><div className="demo-command__copy"><SectionEyebrow icon={FileCheck2}>SELECT A SEALED RECORD</SectionEyebrow><h2>Run the before / after test</h2><p>Use this flow to explain the integrity guarantee in under two minutes.</p></div><div className="demo-command__controls"><select id="demo-record-select" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setTampered(false); }}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select>{tampered ? <button id="demo-tamper-action" className="button button--secondary" type="button" onClick={reset}><RefreshCw size={15} />Reset demo</button> : <button id="demo-tamper-action" className="button button--danger" type="button" onClick={simulate} disabled={checking}>{checking ? <LoaderCircle size={15} className="spin" /> : <Zap size={15} />}{checking ? 'Applying mutation…' : 'Simulate tamper'}</button>}</div></section><div className="demo-comparison"><DemoChainColumn tourId="demo-before-card" title="Before tamper" subtitle="Original signed state" chain={baseline} valid /><div className="demo-divider"><span>THEN</span><ArrowRight size={17} /><span>NOW</span></div><DemoChainColumn title="After tamper" subtitle={tampered ? 'Recomputed state' : 'Awaiting simulation'} chain={afterChain} valid={!tampered} /><div className="demo-result-badge"><span className={tampered ? 'demo-result-badge--bad' : 'demo-result-badge--good'}>{tampered ? <ShieldAlert size={18} /> : <ShieldCheck size={18} />}</span><strong>{tampered ? 'CHAIN BREAK VISIBLE' : 'CHAIN INTACT'}</strong><small>{tampered ? `Block ${afterResult.brokenAtIndex} fails verification` : 'No mismatch detected'}</small></div></div><div className="comparison-control"><span>Original state</span><input aria-label="Compare original and mutated states" type="range" min="0" max="100" value={comparison} onChange={(event) => setComparison(Number(event.target.value))} /><span>Mutated state</span><strong>{comparison}% focus</strong></div><section className="demo-lower-grid"><div className="panel explainer-panel"><SectionEyebrow icon={Fingerprint}>HOW THE DETECTION WORKS</SectionEyebrow><h2>One changed value breaks the link.</h2><div className="explainer-steps"><ExplainerStep number="01" title="Each action is hashed" text="The block stores its own data fingerprint — including officer, time and action." /><ExplainerStep number="02" title="The next block remembers it" text="Every new record stores the previous block’s hash, creating a linked sequence." /><ExplainerStep number="03" title="Verification recomputes everything" text="A single altered value produces a different fingerprint and exposes the exact break." /></div><Link to="/verify" className="text-link">Open full chain verifier <ArrowRight size={15} /></Link></div><div id="demo-terminal" className="panel terminal-panel"><div className="panel-header"><div><SectionEyebrow icon={Terminal}>LIVE DEMO TRACE</SectionEyebrow><h2>Integrity engine console</h2></div><span className="terminal-live"><span /> LIVE</span></div><div className="terminal-window"><div className="terminal-window__bar"><span /><span /><span /><code>sakshya-integrity-engine</code></div><div className="terminal-output">{logs.map((log, index) => <div key={`${log}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><code><i>›</i> {log}{index === logs.length - 1 && <b className="terminal-cursor" />}</code></div>)}</div></div><div className="terminal-footer"><span><span className="pulse-dot pulse-dot--green" />Local test environment</span><code>SHA-256 / chained</code></div></div></section></div>;
-}
+  const selectEvidence = useCallback(async (id) => {
+    if (!id) return;
+    markBusy('select', true);
+    setGlobalError('');
+    try {
+      const selected = await api.getEvidence(id);
+      mergeEvidence(selected);
+      setVerification(null);
+      setReport(null);
+      setLastOperation(null);
+      navigateView('overview');
+      toast.success('Evidence record loaded from the live register.');
+    } catch (error) {
+      fail(error, 'Unable to load this evidence record.');
+    } finally {
+      markBusy('select', false);
+    }
+  }, [fail, markBusy, mergeEvidence, navigateView]);
 
-function DemoChainColumn({ title, subtitle, chain = [], valid, tourId }) {
-  return <section id={tourId} className={cn('demo-chain-column', !valid && 'demo-chain-column--bad')}><div className="demo-chain-column__header"><div><h3>{title}</h3><span>{subtitle}</span></div><StatusBadge status={valid ? 'valid' : 'compromised'} label={valid ? 'VALID' : 'BROKEN'} /></div><div className="demo-block-list">{chain.slice(0, 5).map((entry, index) => { const bad = !valid && index >= 2; return <div className={cn('demo-block', bad && 'demo-block--bad')} key={`${entry.index}-${title}`}><span className="demo-block__number">{String(entry.index).padStart(2, '0')}</span><div><strong>{entry.action.replaceAll('_', ' ')}</strong><HashChip hash={entry.hash} copyable={false} label="" /></div>{bad ? <ShieldAlert size={15} /> : <CheckCircle2 size={15} />}</div>; })}</div><div className="demo-chain-column__foot"><span><Link2 size={13} />{chain.length} linked blocks</span><code>{valid ? 'MATCH' : 'MISMATCH'}</code></div></section>;
-}
+  const chooseFile = useCallback((file) => {
+    if (!file) return;
+    if (file.size > (health.data?.uploadLimitBytes || MAX_UPLOAD_BYTES)) {
+      setUploadErrors({ file: `File exceeds the ${formatSize(health.data?.uploadLimitBytes || MAX_UPLOAD_BYTES)} upload limit.` });
+      setUploadForm((current) => ({ ...current, file: null }));
+      return;
+    }
+    setUploadErrors((current) => ({ ...current, file: '' }));
+    setUploadForm((current) => ({ ...current, file }));
+  }, [health.data?.uploadLimitBytes]);
 
-function ExplainerStep({ number, title, text }) {
-  return <div className="explainer-step"><span>{number}</span><div><strong>{title}</strong><p>{text}</p></div></div>;
-}
+  const handleUpload = useCallback(async (event) => {
+    event.preventDefault();
+    const errors = {};
+    if (!uploadForm.file) errors.file = 'Select an evidence file before sealing.';
+    if (!uploadForm.caseId.trim()) errors.caseId = 'Case ID is required for custody registration.';
+    if (!uploadForm.officer.trim()) errors.officer = 'Officer name is required for the initial custody event.';
+    if (Object.values(errors).some(Boolean)) {
+      setUploadErrors(errors);
+      return;
+    }
+    markBusy('upload', true);
+    setGlobalError('');
+    try {
+      const created = await api.uploadEvidence(uploadForm);
+      mergeEvidence(created);
+      setVerification(null);
+      setReport(null);
+      setLastOperation('upload');
+      setUploadForm({ caseId: '', officer: '', description: '', classification: 'Sensitive', file: null });
+      setUploadErrors({});
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      navigateView('overview');
+      toast.success('Evidence sealed and registered on the live backend.');
+    } catch (error) {
+      fail(error, 'Evidence upload failed.');
+    } finally {
+      markBusy('upload', false);
+    }
+  }, [fail, mergeEvidence, markBusy, navigateView, uploadForm]);
 
-function AnomaliesPage() {
-  const [expanded, setExpanded] = useState(anomalyEvents[0]?.id);
-  const [events, setEvents] = useState(anomalyEvents);
-  const open = events.filter((event) => event.status === 'Open').length;
-  function escalate(id) {
-    setEvents((current) => current.map((event) => event.id === id ? { ...event, status: 'Escalated' } : event));
-    toast.success('Alert escalated to the Senior Authority queue.');
-  }
-  return <div className="anomalies-page"><PageHeader eyebrow="SECURITY MONITORING" icon={ShieldAlert} title="Anomaly centre" description="AI-assisted detection of access patterns that fall outside the expected custody profile." actions={<><div className="security-score"><span>GRID RISK</span><strong>LOW</strong><i>18 / 100</i></div><button className="button button--secondary" type="button"><RefreshCw size={15} />Refresh signals</button></>} /><section className="anomaly-overview"><div className="security-overview-card"><div className="security-overview-card__top"><div><SectionEyebrow icon={ShieldCheck}>SECURITY POSTURE</SectionEyebrow><h2>Monitoring is active</h2></div><div className="security-radar"><span /><span /><span /><CircleDot size={17} /></div></div><p>SAKSHYA is continuously comparing access time, officer assignment, device identity and location against the department baseline.</p><div className="security-overview-card__metrics"><span><strong>98.4%</strong> events within policy</span><span><strong>04</strong> active signals</span><span><strong>00</strong> blocked sessions</span></div></div><div className="anomaly-stat-stack"><div><span className="anomaly-stat-stack__icon anomaly-stat-stack__icon--red"><ShieldAlert size={17} /></span><div><strong>{open.toString().padStart(2, '0')}</strong><span>Open alerts</span></div></div><div><span className="anomaly-stat-stack__icon anomaly-stat-stack__icon--amber"><Activity size={17} /></span><div><strong>06</strong><span>Flagged today</span></div></div><div><span className="anomaly-stat-stack__icon anomaly-stat-stack__icon--green"><CheckCircle2 size={17} /></span><div><strong>31</strong><span>Resolved this month</span></div></div></div></section><section className="security-panel"><div className="panel-header"><div><SectionEyebrow icon={AlertTriangle}>FLAGGED ACCESS EVENTS</SectionEyebrow><h2>Review queue <span className="title-count">{events.length}</span></h2></div><div className="filter-tabs"><button className="filter-tab filter-tab--active" type="button">All <span>{events.length}</span></button><button className="filter-tab" type="button">Open <span>{open}</span></button><button className="filter-tab" type="button">Escalated</button></div></div><div className="anomaly-list">{events.map((event, index) => <motion.article className={cn('anomaly-card', expanded === event.id && 'anomaly-card--expanded')} key={event.id} {...motionProps(index * 0.04)}><button className="anomaly-card__summary" type="button" onClick={() => setExpanded(expanded === event.id ? null : event.id)}><span className="anomaly-card__score"><strong>{event.score}</strong><small>/100</small></span><span className="anomaly-card__signal"><span><RiskBadge risk={event.risk} /><code>{event.id}</code></span><strong>{event.type}</strong><small><code>{event.docId}</code> · {event.actor}</small></span><span className="anomaly-card__when"><strong>{event.when}</strong><small>{event.status}</small></span><ChevronDown size={17} className={expanded === event.id ? 'rotate-180' : ''} /></button><AnimatePresence initial={false}>{expanded === event.id && <motion.div className="anomaly-card__details" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}><div className="anomaly-card__explanation"><SectionEyebrow icon={Info}>WHY THIS WAS FLAGGED</SectionEyebrow><p>{event.summary}</p><ul>{event.details.map((detail) => <li key={detail}>{detail}</li>)}</ul></div><div className="anomaly-card__actions"><span><MapPin size={14} />Session geofence evaluated</span><span><Clock3 size={14} />Baseline comparison complete</span><button className="button button--danger" type="button" onClick={() => escalate(event.id)} disabled={event.status === 'Escalated'}><Send size={14} />{event.status === 'Escalated' ? 'Escalated to authority' : 'Escalate to Senior Authority'}</button></div></motion.div>}</AnimatePresence></motion.article>)}</div></section></div>;
-}
+  const verifyEvidence = useCallback(async () => {
+    if (!evidence?.id) {
+      toast.error('Select an evidence record first.');
+      return;
+    }
+    markBusy('verify', true);
+    setVerification(null);
+    setGlobalError('');
+    try {
+      const result = await api.verifyEvidence(evidence.id);
+      mergeEvidence(result);
+      const verified = {
+        valid: result.valid === true,
+        brokenAtIndex: Number.isInteger(result.brokenAtIndex) ? result.brokenAtIndex : null,
+        details: result.details || result.message || 'Verification completed.',
+        alertMessage: result.alertMessage || null,
+      };
+      setVerification(verified);
+      setLastOperation('verify');
+      if (verified.valid) toast.success('Integrity verified: hash and audit chain match.');
+      else toast.error(verified.alertMessage || 'Integrity verification failed.');
+    } catch (error) {
+      fail(error, 'Integrity verification failed.');
+    } finally {
+      markBusy('verify', false);
+    }
+  }, [evidence?.id, fail, markBusy, mergeEvidence]);
 
-function ReportsPage({ documents }) {
-  const params = new URLSearchParams(window.location.search);
-  const [selectedId, setSelectedId] = useState(params.get('doc') || documents[0]?.docId || '');
-  const document = documents.find((item) => item.docId === selectedId) || documents[0];
+  const tamperEvidence = useCallback(async () => {
+    if (!evidence?.id) {
+      toast.error('Select an evidence record first.');
+      return;
+    }
+    markBusy('tamper', true);
+    setGlobalError('');
+    try {
+      const mutated = await api.tamperEvidence(evidence.id);
+      mergeEvidence(mutated);
+      setVerification(null);
+      setReport(null);
+      setLastOperation('tamper');
+      toast('Demo mutation applied by the backend. Verify the record to expose the break.', { icon: '⚠' });
+    } catch (error) {
+      fail(error, 'The demo mutation could not be applied.');
+    } finally {
+      markBusy('tamper', false);
+    }
+  }, [evidence?.id, fail, markBusy, mergeEvidence]);
 
-  function exportJson() {
-    const blob = new Blob([JSON.stringify(document, null, 2)], { type: 'application/json' });
+  const resetDemo = useCallback(async () => {
+    if (!evidence?.id) return;
+    markBusy('reset', true);
+    setGlobalError('');
+    try {
+      const restored = await api.resetDemo(evidence.id);
+      mergeEvidence(restored);
+      setVerification(null);
+      setReport(null);
+      setLastOperation('reset');
+      toast.success('Backend demo baseline restored.');
+    } catch (error) {
+      fail(error, 'The backend demo baseline could not be restored.');
+    } finally {
+      markBusy('reset', false);
+    }
+  }, [evidence?.id, fail, markBusy, mergeEvidence]);
+
+  const requestOtp = useCallback(async () => {
+    if (!evidence?.id) return;
+    if (!transferForm.recipient.trim()) {
+      toast.error('Enter the receiving officer before requesting an OTP.');
+      return;
+    }
+    markBusy('otp', true);
+    setGlobalError('');
+    try {
+      const challenge = await api.requestTransferOtp(evidence.id, transferForm.recipient.trim());
+      setOtpChallenge(challenge);
+      setTransferForm((current) => ({ ...current, otp: challenge.otp || '' }));
+      toast.success('Transfer OTP generated by the backend demo service.');
+    } catch (error) {
+      fail(error, 'Unable to start the custody transfer.');
+    } finally {
+      markBusy('otp', false);
+    }
+  }, [evidence?.id, fail, markBusy, transferForm.recipient]);
+
+  const transferEvidence = useCallback(async (event) => {
+    event.preventDefault();
+    if (!evidence?.id) return;
+    if (!transferForm.recipient.trim() || !/^\d{6}$/.test(transferForm.otp)) {
+      toast.error('Enter a recipient and the six-digit verification code.');
+      return;
+    }
+    markBusy('transfer', true);
+    setGlobalError('');
+    try {
+      const updated = await api.transferEvidence(evidence.id, {
+        recipient: transferForm.recipient.trim(),
+        otp: transferForm.otp,
+      });
+      mergeEvidence(updated);
+      setOtpChallenge(null);
+      setTransferForm({ recipient: '', otp: '' });
+      setVerification(null);
+      setReport(null);
+      setLastOperation('transfer');
+      toast.success('Custody handover sealed after OTP verification.');
+      navigateView('overview');
+    } catch (error) {
+      fail(error, 'Custody transfer failed.');
+    } finally {
+      markBusy('transfer', false);
+    }
+  }, [evidence?.id, fail, markBusy, mergeEvidence, navigateView, transferForm]);
+
+  const loadReport = useCallback(async () => {
+    if (!evidence?.id) {
+      toast.error('Select an evidence record first.');
+      return null;
+    }
+    markBusy('report', true);
+    setGlobalError('');
+    try {
+      const generated = await api.getEvidenceReport(evidence.id);
+      setReport(generated);
+      return generated;
+    } catch (error) {
+      fail(error, 'Forensic report could not be generated.');
+      return null;
+    } finally {
+      markBusy('report', false);
+    }
+  }, [evidence?.id, fail, markBusy]);
+
+  const downloadReport = useCallback(async () => {
+    const generated = report || await loadReport();
+    if (!generated) return;
+    const fileId = generated.evidence?.id || evidence?.id || 'record';
+    const blob = new Blob([JSON.stringify(generated, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const anchor = documentCreateLink(url, `${document.docId}-custody-report.json`);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `SAKSHYA-${fileId}-court-ready-report.json`;
+    document.body.appendChild(anchor);
     anchor.click();
+    anchor.remove();
     URL.revokeObjectURL(url);
-    toast.success('Chain JSON exported.');
-  }
+    toast.success('Court-ready evidence report downloaded.');
+  }, [evidence?.id, loadReport, report]);
 
-  function printReport() {
-    toast.success('Opening print-ready court report.');
-    window.setTimeout(() => window.print(), 150);
-  }
+  const startNewEvidence = useCallback(() => {
+    evidenceRef.current = null;
+    setEvidence(null);
+    setVerification(null);
+    setReport(null);
+    setLastOperation('new');
+    setGlobalError('');
+    setUploadErrors({});
+    navigateView('upload');
+  }, [navigateView]);
 
-  return <div className="reports-page"><PageHeader eyebrow="JUDICIAL OUTPUT" icon={FileText} title="Forensic report generator" description="Assemble a court-admissible evidence report with custody proof and officer attestations." actions={<><button className="button button--secondary" type="button" onClick={exportJson}><FileJson size={15} />Export chain JSON</button><button className="button button--primary" type="button" onClick={printReport}><Printer size={15} />Export as court PDF</button></>} /><div className="report-layout"><aside className="report-selector panel"><SectionEyebrow icon={FileCheck2}>REPORT SUBJECT</SectionEyebrow><h2>Select document</h2><FormField label="Evidence record"><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId}</option>)}</select></FormField><div className="report-subject"><FileText size={18} /><div><strong>{document?.name}</strong><span>{document?.caseId}</span></div></div><div className="report-checks"><div><CheckCircle2 size={15} /><span>Custody timeline included</span></div><div><CheckCircle2 size={15} /><span>Hash proof attached</span></div><div><CheckCircle2 size={15} /><span>Signature block included</span></div></div><div className="signature-badge"><BadgeCheck size={19} /><div><strong>Digital signature verified</strong><span>Authority certificate · MHA-NODE-01</span></div></div></aside><section className="report-paper-wrap"><div className="report-paper"><div className="report-paper__top"><div className="report-paper__emblem"><span>भारत सरकार</span><strong>सत्यमेव जयते</strong></div><div className="report-paper__title"><span>GOVERNMENT OF INDIA</span><strong>MINISTRY OF HOME AFFAIRS</strong><small>SECURE DIGITAL EVIDENCE DIRECTORATE</small></div><div className="report-paper__classification">RESTRICTED<br /><span>COURT COPY</span></div></div><div className="report-paper__rule" /><div className="report-paper__heading"><span>CRYPTOGRAPHIC CUSTODY REPORT</span><h2>{document?.docId}</h2><p>Generated by SAKSHYA Secure Evidence Custody Grid · {formatTime(new Date().toISOString())}</p></div><div className="report-paper__facts"><div><span>Case reference</span><strong>{document?.caseId}</strong></div><div><span>Evidence item</span><strong>{document?.name}</strong></div><div><span>Classification</span><strong>{document?.classification}</strong></div><div><span>Chain status</span><strong className={document?.status === 'valid' ? 'text-success' : 'text-danger'}>{document?.status === 'valid' ? 'VERIFIED / INTACT' : 'COMPROMISED / REVIEW'}</strong></div></div><div className="report-paper__section"><span className="report-section-number">01</span><div><h3>Custody chain summary</h3><p>The following actions were recorded in chronological order. Each block includes the fingerprint of its own data and the preceding block.</p></div></div><div className="report-table"><div className="report-table__row report-table__head"><span>Block</span><span>Timestamp / officer</span><span>Action</span><span>Fingerprint</span></div>{document?.chain.map((entry) => <div className="report-table__row" key={entry.index}><span className="mono">{String(entry.index).padStart(2, '0')}</span><span><strong>{formatTime(entry.timestamp)}</strong><small>{entry.officer} · {entry.badge}</small></span><span>{entry.action.replaceAll('_', ' ')}</span><span><HashChip hash={entry.hash} copyable={false} label="" /></span></div>)}</div><div className="report-paper__section"><span className="report-section-number">02</span><div><h3>Hash verification proof</h3><p>Root fingerprint and latest linked block are reproduced below for independent verification.</p></div></div><div className="report-paper__hashes"><div><span>ROOT FINGERPRINT</span><code>{document?.chain[0]?.hash}</code></div><div><span>LATEST BLOCK FINGERPRINT</span><code>{document?.chain.at(-1)?.hash}</code></div></div><div className="report-paper__signature"><div><div className="signature-line" /><span>Digitally signed by</span><strong>SAKSHYA INTEGRITY ENGINE</strong><small>Certificate: MHA-NODE-01 · Timestamped record</small></div><div className="report-seal-stamp"><BadgeCheck size={24} /><span>VERIFIED</span></div></div><div className="report-paper__footer">This report is a prototype output for Smart India Hackathon 2026 · SIH26190 · Page 1 of 1</div></div></section></div></div>;
+  return (
+    <ErrorBoundary>
+      <div className={`app-root ${theme === 'dark' ? 'theme-dark' : ''}`}>
+        <Toaster position="bottom-right" toastOptions={{ duration: 3600, style: { background: theme === 'dark' ? '#10253b' : '#0a2540', color: '#fff', borderRadius: '7px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} />
+        <Sidebar activeView={activeView} onNavigate={navigateView} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+        <div className="app-content">
+          <Topbar health={health} lastSync={lastSync} theme={theme} onThemeToggle={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} onMenu={() => setMobileNavOpen(true)} onNavigate={navigateView} />
+          <main className="workspace">
+            <div className="workspace-toolbar"><div className="breadcrumb"><span>SAKSHYA</span><ChevronRight size={13} /><strong>{NAV_ITEMS.find((item) => item.id === activeView)?.label || 'Command centre'}</strong></div><span className="workspace-classification"><LockKeyhole size={12} /> RESTRICTED SYSTEM · SIH26190</span></div>
+            <AnimatePresence initial={false} mode="wait">
+              <motion.div key={activeView} className="view-transition" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}>
+                {activeView === 'overview' && <OverviewView evidence={evidence} verification={verification} records={records} onSelect={selectEvidence} onNavigate={navigateView} onVerify={verifyEvidence} onReport={loadReport} onNew={startNewEvidence} search={search} onSearch={setSearch} busy={busy} />}
+                {activeView === 'upload' && <UploadView form={uploadForm} errors={uploadErrors} onChange={setUploadForm} onSubmit={handleUpload} onChooseFile={chooseFile} dragActive={dragActive} setDragActive={setDragActive} fileInputRef={fileInputRef} busy={busy.upload} onBack={() => navigateView('overview')} />}
+                {activeView === 'integrity' && <IntegrityView evidence={evidence} verification={verification} busy={busy} onVerify={verifyEvidence} onTamper={tamperEvidence} onReset={resetDemo} onNavigate={navigateView} onSelect={selectEvidence} records={records} />}
+                {activeView === 'transfer' && <TransferView evidence={evidence} form={transferForm} onChange={setTransferForm} challenge={otpChallenge} onRequestOtp={requestOtp} onSubmit={transferEvidence} busy={busy} onNavigate={navigateView} />}
+                {activeView === 'report' && <ReportView evidence={evidence} report={report} onLoad={loadReport} onDownload={downloadReport} busy={busy.report} onNavigate={navigateView} />}
+              </motion.div>
+            </AnimatePresence>
+            {globalError && <div className="system-error" role="alert"><CircleAlert size={16} /><span>{globalError}</span><button type="button" aria-label="Dismiss error" onClick={() => setGlobalError('')}><X size={15} /></button></div>}
+          </main>
+          <Footer />
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
 }
 
-function documentCreateLink(url, filename) {
-  const anchor = window.document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  return anchor;
+function Sidebar({ activeView, onNavigate, open, onClose }) {
+  return <><div className={`sidebar-backdrop ${open ? 'is-visible' : ''}`} onClick={onClose} /><aside className={`app-sidebar ${open ? 'is-open' : ''}`} aria-label="Primary navigation"><div className="sidebar-brand"><LogoMark /><div><strong>SAKSHYA</strong><span>Digital Evidence Integrity Platform</span></div><button className="sidebar-close" type="button" aria-label="Close navigation" onClick={onClose}><X size={17} /></button></div><div className="sidebar-official"><OfficialEmblem /><div><span>Government of India</span><strong>Ministry of Home Affairs</strong></div></div><div className="sidebar-divider" /><nav className="sidebar-nav"><span className="sidebar-nav__label">WORKSPACE</span>{NAV_ITEMS.slice(0, 1).map((item) => <NavItem key={item.id} item={item} active={activeView === item.id} onClick={() => onNavigate(item.id)} />)}<span className="sidebar-nav__label">OPERATIONS</span>{NAV_ITEMS.slice(1, 4).map((item) => <NavItem key={item.id} item={item} active={activeView === item.id} onClick={() => onNavigate(item.id)} />)}<span className="sidebar-nav__label">DOCUMENTATION</span>{NAV_ITEMS.slice(4).map((item) => <NavItem key={item.id} item={item} active={activeView === item.id} onClick={() => onNavigate(item.id)} />)}</nav><div className="sidebar-spacer" /><div className="sidebar-security"><ShieldCheck size={16} /><div><strong>Integrity engine</strong><span>SHA-256 chaining enabled</span></div></div><div className="sidebar-footer"><span>RESTRICTED SYSTEM</span><code>v1.0 · SIH26190</code></div></aside></>;
 }
 
-function TransferPage({ documents, onAddAction }) {
-  const [selectedId, setSelectedId] = useState(documents[0]?.docId || '');
-  const [stage, setStage] = useState('details');
-  const [form, setForm] = useState({ from: 'Ananya Rao · DL-4172', to: 'Meera Joshi · DL-5321', reason: 'Forensic examination', fromOtp: '', toOtp: '' });
-  const [busy, setBusy] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const document = documents.find((item) => item.docId === selectedId);
-
-  async function continueToConfirm(event) {
-    event.preventDefault();
-    setBusy(true);
-    await wait(450);
-    setBusy(false);
-    setStage('confirm');
-  }
-
-  async function confirmTransfer(event) {
-    event.preventDefault();
-    if (form.fromOtp.length !== 4 || form.toOtp.length !== 4) { toast.error('Enter the four-digit OTP from both officers.'); return; }
-    setBusy(true);
-    await onAddAction(selectedId, { action: 'TRANSFERRED', officerName: form.from, officerBadge: form.from.split('·')[1]?.trim(), details: `Custody transferred to ${form.to} for ${form.reason}. Dual OTP confirmation recorded.` });
-    await wait(350);
-    setBusy(false);
-    setSuccess(true);
-    setStage('success');
-    toast.success('Dual-officer custody handover completed.');
-  }
-
-  return <div className="transfer-page"><PageHeader eyebrow="CUSTODY HANDOVER" icon={Send} title="Transfer evidence" description="A dual-confirmation handover keeps physical and digital custody aligned." actions={<StatusBadge status="online" label="Location services active" />} /><div className="transfer-layout"><section className="panel transfer-flow"><div className="stepper"><Step number="01" label="Evidence & reason" active={stage === 'details'} complete={stage !== 'details'} /><Step number="02" label="Dual confirmation" active={stage === 'confirm'} complete={stage === 'success'} /><Step number="03" label="Transfer sealed" active={stage === 'success'} /></div>{stage === 'details' && <form className="transfer-form" onSubmit={continueToConfirm}><div className="panel-header"><div><SectionEyebrow icon={QrCode}>EVIDENCE IDENTIFIER</SectionEyebrow><h2>Scan or select the record</h2></div></div><div className="qr-select-row"><div className="qr-preview"><QrCode size={72} /><span>SCAN READY</span><small>Physical evidence QR</small></div><div className="qr-select-copy"><FormField label="Document / evidence ID" required><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{documents.map((item) => <option key={item.docId} value={item.docId}>{item.docId} · {item.name}</option>)}</select></FormField><button className="button button--secondary" type="button" onClick={() => toast('Scanner simulation ready — choose a seeded record.', { icon: '⌁' })}><ScanLine size={15} />Open QR scanner</button></div></div><div className="form-divider" /><div className="form-grid form-grid--two"><FormField label="From officer" required><select value={form.from} onChange={(event) => setForm({ ...form, from: event.target.value })}><option>Ananya Rao · DL-4172</option><option>Vikram Singh · DL-2198</option><option>Sourav Ghosh · WB-2901</option></select></FormField><FormField label="To officer" required><select value={form.to} onChange={(event) => setForm({ ...form, to: event.target.value })}><option>Meera Joshi · DL-5321</option><option>Priya Nair · WB-9018</option><option>Arjun Mehta · MH-7120</option></select></FormField></div><FormField label="Transfer reason" required><select value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })}><option>Forensic examination</option><option>Court production</option><option>Inter-departmental review</option><option>Secure storage relocation</option></select></FormField><LocationCard /><div className="form-submit-row"><span><LockKeyhole size={14} /> Both officers must confirm before custody changes.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={15} />}{busy ? 'Preparing handover…' : 'Continue to confirmation'}</button></div></form>}{stage === 'confirm' && <form className="transfer-form" onSubmit={confirmTransfer}><div className="handover-banner"><div className="handover-banner__icon"><Users size={20} /></div><div><SectionEyebrow icon={ClipboardCheck}>DUAL OFFICER CONFIRMATION</SectionEyebrow><h2>Both parties acknowledge custody</h2><p>{document?.docId} · {form.reason}</p></div></div><div className="officer-confirm-grid"><OfficerConfirm label="FROM OFFICER" officer={form.from} otp={form.fromOtp} onChange={(value) => setForm({ ...form, fromOtp: value })} /><OfficerConfirm label="TO OFFICER" officer={form.to} otp={form.toOtp} onChange={(value) => setForm({ ...form, toOtp: value })} /></div><LocationCard /><div className="form-submit-row"><button className="button button--secondary" type="button" onClick={() => setStage('details')}><ArrowLeft size={15} />Back</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{busy ? 'Sealing transfer…' : 'Confirm & seal handover'}</button></div></form>}{stage === 'success' && <div className="transfer-success"><div className="transfer-success__icon"><CheckCircle2 size={34} /></div><SectionEyebrow icon={ShieldCheck}>CUSTODY UPDATED</SectionEyebrow><h2>Transfer successfully sealed</h2><p>Both officers confirmed the handover. A new TRANSFERRED block is now linked to the record.</p><div className="success-transfer-card"><span>{document?.docId}</span><strong>{form.from} <ArrowRight size={15} /> {form.to}</strong><small>{formatTime(new Date().toISOString())} · Location captured · OTP verified</small></div><div><Link to={`/document/${selectedId}`} className="button button--primary">View updated chain <ArrowRight size={15} /></Link><button className="button button--secondary" type="button" onClick={() => { setSuccess(false); setStage('details'); }}>Start another handover</button></div></div>}</section><aside className="transfer-aside"><section className="panel transfer-record"><SectionEyebrow icon={FileCheck2}>SELECTED RECORD</SectionEyebrow><h2>{document?.docId}</h2><p>{document?.name}</p><div className="transfer-record__status"><StatusBadge status={document?.status || 'pending'} /><span>{document?.chain.length || 0} existing blocks</span></div><div className="transfer-record__hash"><span>Latest linked hash</span><HashChip hash={document?.chain.at(-1)?.hash || 'GENESIS'} /></div></section><section className="panel security-note"><div className="security-note__icon"><ShieldCheck size={18} /></div><div><strong>Why two officers?</strong><p>Dual confirmation binds the custody change to both identities and prevents a single-user handover.</p></div></section></aside></div></div>;
+function NavItem({ item, active, onClick }) {
+  const Icon = item.icon;
+  return <button className={`nav-item ${active ? 'is-active' : ''}`} type="button" onClick={onClick} aria-current={active ? 'page' : undefined}><span className="nav-item__icon"><Icon size={17} strokeWidth={active ? 2.2 : 1.8} /></span><span className="nav-item__copy"><strong>{item.label}</strong><small>{item.hint}</small></span>{active && <ChevronRight size={14} className="nav-item__arrow" />}</button>;
 }
 
-function Step({ number, label, active, complete }) {
-  return <div className={cn('step', active && 'step--active', complete && 'step--complete')}><span>{complete ? <Check size={13} /> : number}</span><strong>{label}</strong></div>;
+function Topbar({ health, lastSync, theme, onThemeToggle, onMenu, onNavigate }) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  return <header className="topbar"><button className="mobile-menu" type="button" aria-label="Open navigation" onClick={onMenu}><Menu size={20} /></button><div className="topbar-title"><span className="topbar-title__eyebrow">SECURE OPERATIONS</span><strong>{greetingForCurrentHour()}, Rajiv</strong><small className="topbar-title__support">Evidence custody command centre · Human review remains in control</small></div><div className="topbar-actions"><BackendStatus health={health} lastSync={lastSync} /><div className="topbar-control"><button className="topbar-icon" type="button" aria-label="Open notifications" onClick={() => setNotificationsOpen((value) => !value)}><Bell size={17} /><i /></button>{notificationsOpen && <div className="topbar-popover notification-popover"><span className="popover-label">NOTIFICATIONS <b>1 new</b></span><div className="notification-row"><span className="notification-icon notification-icon--amber"><AlertTriangle size={15} /></span><div><strong>Review live evidence register</strong><small>Open a record to verify its current custody state.</small></div></div><button className="popover-link" type="button" onClick={() => { setNotificationsOpen(false); onNavigate('overview'); }}>Open command centre <ArrowUpRight size={13} /></button></div>}</div><button className="topbar-icon" type="button" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={onThemeToggle}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button><div className="topbar-control"><button className="user-chip" type="button" onClick={() => setProfileOpen((value) => !value)}><span className="avatar">RM</span><span><strong>Rajiv Menon</strong><small>Senior Authority</small></span><ChevronRight size={13} /></button>{profileOpen && <div className="topbar-popover user-popover"><span className="popover-label">AUTHORITY PROFILE</span><div className="profile-row"><span className="avatar avatar--large">RM</span><div><strong>Rajiv Menon</strong><small>Senior Authority · MHA-001</small></div></div><div className="profile-meta"><span><Database size={12} /> Department register</span><span><LockKeyhole size={12} /> MFA verified</span></div></div>}</div></div></header>;
 }
 
-function OfficerConfirm({ label, officer, otp, onChange }) {
-  return <div className="officer-confirm"><span className="officer-confirm__label">{label}</span><div className="officer-confirm__identity"><div className="avatar avatar--small">{officer.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div><div><strong>{officer.split('·')[0]}</strong><span>{officer.split('·')[1]}</span></div><StatusBadge status="verified" label="Identity verified" /></div><label className="otp-label"><span>Enter 4-digit OTP</span><input value={otp} onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 4))} inputMode="numeric" pattern="[0-9]{4}" placeholder="••••" /></label><small className="otp-hint">Simulation accepts any four digits</small></div>;
+function BackendStatus({ health, lastSync }) {
+  const state = health.state === 'online' ? 'online' : health.state === 'checking' ? 'checking' : 'offline';
+  const label = state === 'online' ? 'Backend online' : state === 'checking' ? 'Checking API' : 'Backend offline';
+  return <div className={`backend-status backend-status--${state}`} title={health.error || (lastSync ? `Last sync ${formatDate(lastSync)}` : 'Live API health check')} role="status" aria-live="polite"><span className="backend-status__dot" /><span>{label}</span>{state === 'online' && <small>{health.data?.documentCount ?? 0} records</small>}</div>;
 }
 
-function LocationCard() {
-  return <div className="location-card"><div className="location-card__icon"><MapPin size={16} /></div><div><span>LOCATION AUTO-CAPTURE</span><strong>28.7041° N, 77.1025° E</strong><small>South District Evidence Room · GPS accuracy ±8m</small></div><StatusBadge status="verified" label="Captured" /></div>;
+function LogoMark() {
+  return <span className="logo-mark" aria-hidden="true"><Fingerprint size={21} /><i /></span>;
 }
 
-function AdminPage({ documents }) {
-  const totalAccess = officers.reduce((sum, officer) => sum + officer.accesses, 0);
-  const compromised = documents.filter((document) => document.status === 'compromised').length;
-  return <div className="admin-page"><PageHeader eyebrow="SENIOR AUTHORITY VIEW" icon={Users} title="Authority console" description="Department-wide custody statistics, officer access patterns and escalation controls." actions={<><button className="button button--secondary" type="button"><Download size={15} />Export oversight report</button><button className="button button--primary" type="button"><Users size={15} />Manage officers</button></>} /><section className="stats-grid"><StatsCard label="Active officers" value="48" helper="Across 8 registered units" icon={Users} tone="navy" trend="+4 this month" /><StatsCard label="Accesses today" value={String(totalAccess).padStart(2, '0')} helper="98.4% policy compliant" icon={Eye} tone="blue" trend="+6.7%" /><StatsCard label="Department chains" value="1,284" helper="1,271 currently valid" icon={Network} tone="teal" trend="+18.2%" /><StatsCard label="Escalations" value={String(compromised).padStart(2, '0')} helper="Awaiting senior review" icon={ShieldAlert} tone="amber" trend="Needs action" /></section><section className="admin-layout"><div className="panel officer-panel"><div className="panel-header"><div><SectionEyebrow icon={Users}>OFFICER DIRECTORY</SectionEyebrow><h2>Access and trust posture</h2></div><button className="icon-button" type="button"><MoreHorizontal size={17} /></button></div><div className="officer-table"><div className="officer-table__row officer-table__head"><span>Officer</span><span>Unit / role</span><span>Accesses</span><span>Trust score</span><span>Status</span></div>{officers.map((officer) => <div className="officer-table__row" key={officer.badge}><span className="officer-cell"><div className="avatar avatar--small">{officer.name.split(' ').map((part) => part[0]).join('')}</div><div><strong>{officer.name}</strong><code>{officer.badge}</code></div></span><span><strong>{officer.unit}</strong><small>{officer.role}</small></span><span><strong>{officer.accesses}</strong><small>last {officer.lastSeen}</small></span><span className="trust-cell"><strong className={officer.trust < 80 ? 'text-warning' : 'text-success'}>{officer.trust}%</strong><span className="mini-meter"><i style={{ width: `${officer.trust}%` }} /></span></span><span><StatusBadge status={officer.status === 'Review required' ? 'review' : 'online'} label={officer.status} /></span></div>)}</div></div><div className="panel access-chart-panel"><div className="panel-header"><div><SectionEyebrow icon={BarChart3}>ACCESS PATTERNS</SectionEyebrow><h2>Custody activity by day</h2></div></div><div className="admin-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 10, right: 0, left: -28, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--border-subtle)" /><XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} /><YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} /><Tooltip contentStyle={{ border: '1px solid var(--border)', borderRadius: 7, background: 'var(--panel)', fontSize: 11 }} /><Bar dataKey="sealed" fill="#2563eb" radius={[3, 3, 0, 0]} /><Bar dataKey="verified" fill="#0f6e56" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="chart-legend"><span><i className="legend-square legend-square--sealed" />sealed</span><span><i className="legend-square legend-square--verified" />verified</span></div></div></section><section className="authority-alerts"><div className="section-toolbar"><div><SectionEyebrow icon={ShieldAlert}>ESCALATION MANAGEMENT</SectionEyebrow><h2>Alerts requiring authority review</h2></div><Link to="/anomalies" className="text-link">View all signals <ArrowRight size={14} /></Link></div><div className="authority-alert-grid"><AuthorityAlert title="Integrity chain break" doc="DOC-2026-00172" text="Hash mismatch detected at block 03 during scheduled scan." severity="critical" /><AuthorityAlert title="Unusual access location" doc="DOC-2026-00217" text="Read event originated 18.4 km outside the declared office geofence." severity="warning" /><AuthorityAlert title="Court package pending" doc="CASE/MUM/24-0874" text="Judicial viewer access requested; senior sign-off required." severity="info" /></div></section></div>;
+function OfficialEmblem({ small = false }) {
+  return <span className={`official-emblem ${small ? 'official-emblem--small' : ''}`} aria-label="Government seal placeholder"><span>सत्यमेव</span><strong>जयते</strong></span>;
 }
 
-function AuthorityAlert({ title, doc, text, severity }) {
-  return <article className={cn('authority-alert', `authority-alert--${severity}`)}><span className="authority-alert__icon">{severity === 'critical' ? <ShieldAlert size={17} /> : severity === 'warning' ? <AlertTriangle size={17} /> : <ClipboardCheck size={17} />}</span><div><span className="authority-alert__severity">{severity}</span><h3>{title}</h3><code>{doc}</code><p>{text}</p></div><button className="icon-button" type="button" aria-label="Open alert"><ArrowUpRight size={16} /></button></article>;
+function PageHeader({ eyebrow, title, description, actions }) {
+  return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{actions && <div className="page-header__actions">{actions}</div>}</div>;
 }
 
-function NotFoundPage({ compact = false }) {
-  return <div className={cn('not-found', compact && 'not-found--compact')}><div className="not-found__mark"><Fingerprint size={31} /></div><SectionEyebrow>404 · RECORD NOT FOUND</SectionEyebrow><h1>This route is outside the grid.</h1><p>The requested evidence view does not exist or is not available to this role.</p><Link to="/dashboard" className="button button--primary">Return to command centre <ArrowRight size={15} /></Link></div>;
+function SectionHeading({ eyebrow, title, description, action }) {
+  return <div className="section-heading"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2>{description && <p>{description}</p>}</div>{action}</div>;
 }
 
-class AppErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
+function StatusBadge({ status, label }) {
+  const map = { verified: { text: label || 'VERIFIED', icon: CheckCircle2 }, compromised: { text: label || 'COMPROMISED', icon: ShieldAlert }, sealed: { text: label || 'SEALED', icon: LockKeyhole }, pending: { text: label || 'PENDING', icon: Clock3 }, warning: { text: label || 'REVIEW', icon: AlertTriangle }, online: { text: label || 'ONLINE', icon: Check }, offline: { text: label || 'OFFLINE', icon: CircleAlert } };
+  const item = map[status] || map.pending;
+  const Icon = item.icon;
+  return <span className={`status-badge status-badge--${status}`}><Icon size={12} />{item.text}</span>;
+}
+
+function HashChip({ value, label, full = false }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    const ok = await copyText(value);
+    if (ok) {
+      setCopied(true);
+      toast.success(`${label || 'Hash'} copied.`);
+      window.setTimeout(() => setCopied(false), 1400);
+    } else toast.error('Clipboard access is unavailable.');
+  };
+  return <button className="hash-chip" type="button" onClick={copy} title={value || 'No hash available'}><code>{full ? value || '—' : shortHash(value)}</code>{copied ? <Check size={12} /> : <Copy size={12} />}</button>;
+}
+
+function MetricCard({ label, value, helper, icon: Icon, tone = 'navy' }) {
+  return <motion.article className={`metric-card metric-card--${tone}`} whileHover={{ y: -2 }} transition={{ duration: 0.18 }}><span className="metric-card__icon"><Icon size={18} /></span><div><span>{label}</span><strong>{value}</strong><small>{helper}</small></div></motion.article>;
+}
+
+function OverviewView({ evidence, verification, records, onSelect, onNavigate, onVerify, onReport, onNew, search, onSearch, busy }) {
+  const verifiedCount = records.filter((item) => item.valid === true).length;
+  const compromisedCount = records.filter((item) => item.valid === false || item.status === 'compromised').length;
+  const totalEvents = records.reduce((sum, item) => sum + Number(item.chainLength || item.chain?.length || 0), 0);
+  return <div className="view-stack"><PageHeader eyebrow="OPERATIONS OVERVIEW" title="Digital evidence command centre" description="A live integrity and custody view for evidence registered on the SAKSHYA backend." actions={<><button className="button button--secondary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />Refresh view</button><button className="button button--primary" type="button" onClick={onNew}><FilePlus2 size={15} />Seal evidence</button></>} /><OperatorCue evidence={evidence} /><section className="metric-grid"><MetricCard label="Live evidence records" value={String(records.length).padStart(2, '0')} helper="Fetched from the custody register" icon={Database} tone="navy" /><MetricCard label="Valid backend state" value={String(verifiedCount).padStart(2, '0')} helper="Current hash and chain match" icon={ShieldCheck} tone="green" /><MetricCard label="Integrity incidents" value={String(compromisedCount).padStart(2, '0')} helper={compromisedCount ? 'Verification review required' : 'No compromised records'} icon={ShieldAlert} tone={compromisedCount ? 'red' : 'slate'} /><MetricCard label="Linked audit events" value={String(totalEvents).padStart(2, '0')} helper="Across the live register" icon={Link2} tone="blue" /></section>{!evidence ? <EmptySelection onUpload={onNew} records={records.length} /> : <ActiveEvidenceOverview evidence={evidence} verification={verification} onVerify={onVerify} onNavigate={onNavigate} onReport={onReport} onNew={onNew} busy={busy} />}<section className="register-section card"><SectionHeading eyebrow="LIVE EVIDENCE REGISTER" title="Select an active record" description="Every row below is loaded from GET /api/documents and opens the full evidence response." action={<div className="register-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Filter ID, case or file" aria-label="Filter evidence register" /></div>} /><EvidenceRegister records={records} selectedId={evidence?.id} onSelect={onSelect} search={search} busy={busy.select} /></section></div>;
+}
+
+function OperatorCue({ evidence }) {
+  const selectedCopy = evidence
+    ? `The current record is held by ${evidence.custodyHolder || 'the assigned officer'}. Take a moment to review the latest event before you act.`
+    : 'Begin with the file in front of you. SAKSHYA will keep the people, decisions and evidence trail visible at every step.';
+  return <aside className="operator-cue card" aria-label="Officer review guidance"><span className="operator-cue__avatar"><UserRound size={17} /></span><div><span className="eyebrow">OFFICER REVIEW</span><strong>{evidence ? 'You are viewing a live custody record.' : 'Ready when you are, Officer.'}</strong><p>{selectedCopy}</p></div><span className="operator-cue__tag"><ShieldCheck size={13} />Human sign-off stays in control</span></aside>;
+}
+
+function EmptySelection({ onUpload, records }) {
+  return <section className="empty-selection card"><span className="empty-selection__mark"><Fingerprint size={28} /></span><div><span className="eyebrow">NO ACTIVE RECORD SELECTED</span><h2>Let’s begin with a live evidence record.</h2><p>Upload a file to seal it on the backend, or select one of the {records || 'available'} registered records below. SAKSHYA keeps the officer, decision and evidence trail visible—nothing is simulated in this workflow.</p><button className="button button--primary" type="button" onClick={onUpload}><UploadCloud size={15} />Seal new evidence <ArrowRight size={14} /></button></div><div className="empty-selection__protocol"><span><Check size={13} /> SHA-256 source hash</span><span><Check size={13} /> Linked audit chain</span><span><Check size={13} /> Court-ready report</span></div></section>;
+}
+
+function ActiveEvidenceOverview({ evidence, verification, onVerify, onNavigate, onNew, busy }) {
+  const status = recordStatus(evidence, verification);
+  const lastEvent = evidence.timeline?.[0] || evidence.chain?.at(-1);
+  return <div className="active-evidence"><section className="active-evidence__header card"><div className="file-symbol"><FileText size={25} /></div><div className="active-evidence__identity"><span className="eyebrow">ACTIVE EVIDENCE RECORD</span><h2>{evidence.name || evidence.fileName || evidence.id}</h2><div className="inline-meta"><code>{evidence.id}</code><span>·</span><span>{evidence.mimeType || 'Unknown file type'}</span><span>·</span><span>{formatSize(evidence.size)}</span></div></div><div className="active-evidence__status"><StatusBadge status={status} label={status === 'sealed' ? 'SEALED · VERIFY' : undefined} /><small>Last event {relativeTime(lastEvent?.at || evidence.lastActivity)}</small></div><div className="active-evidence__actions"><button className="button button--primary" type="button" onClick={onVerify} disabled={busy.verify}>{busy.verify ? <><LoaderCircle size={15} className="spin" />Verifying…</> : <><ShieldCheck size={15} />Verify integrity</>}</button><button className="button button--secondary" type="button" onClick={() => onNavigate('transfer')}><ArrowLeftRight size={15} />Transfer</button><button className="button button--quiet" type="button" onClick={() => onNavigate('report')}><FileCheck2 size={15} />Report</button><button className="button button--icon" type="button" aria-label="Start new evidence" title="Start new evidence" onClick={onNew}><FilePlus2 size={16} /></button></div></section><section className="overview-facts"><Fact label="Case ID" value={evidence.caseId} mono /><Fact label="Custody holder" value={evidence.custodyHolder} /><Fact label="Evidence type" value={evidence.evidenceType || evidence.mimeType} /><Fact label="Created" value={formatDate(evidence.createdAt)} /></section><section className="overview-hash-panel card"><SectionHeading eyebrow="CRYPTOGRAPHIC PROOF" title="Sealed fingerprints" description="Copyable values returned by the live evidence record." /><div className="overview-hash-grid"><div><span>ORIGINAL SHA-256</span><HashChip value={evidence.originalHash} label="Original SHA-256" full /></div><div><span>CURRENT SHA-256</span><HashChip value={evidence.currentHash} label="Current SHA-256" full /></div><div><span>AUDIT CHAIN ROOT / HEAD</span><HashChip value={evidence.auditChainHead} label="Audit chain head" full /></div></div></section><div className="overview-columns"><IntegritySnapshot evidence={evidence} verification={verification} onVerify={onVerify} busy={busy.verify} /><LatestEvent evidence={evidence} onNavigate={onNavigate} /></div><section className="chain-summary card"><SectionHeading eyebrow="AUDIT CHAIN SNAPSHOT" title="Linked custody events" description="The latest event is shown first; open Verify Integrity for the complete chain and visual link map." action={<button className="text-button" type="button" onClick={() => onNavigate('integrity')}>Open full chain <ArrowUpRight size={14} /></button>} /><Timeline evidence={evidence} compact /></section></div>;
+}
+
+function Fact({ label, value, mono = false }) {
+  return <div className="fact"><span>{label}</span><strong className={mono ? 'mono' : ''}>{value || '—'}</strong></div>;
+}
+
+function IntegritySnapshot({ evidence, verification, onVerify, busy }) {
+  const status = recordStatus(evidence, verification);
+  const isVerified = status === 'verified';
+  const isCompromised = status === 'compromised';
+  return <section className={`integrity-snapshot card integrity-snapshot--${status}`}><div className="snapshot-heading"><div><span className="eyebrow">INTEGRITY CONTROL</span><h2>{isVerified ? 'Chain verified' : isCompromised ? 'Review required' : 'Ready to verify'}</h2></div><span className="integrity-ring"><span>{isVerified ? '100' : isCompromised ? '00' : '—'}</span><small>TRUST</small></span></div><p>{isVerified ? 'Hash and audit chain match the backend record.' : isCompromised ? 'The evidence or its linked custody record no longer matches the sealed state.' : 'Run the backend verification before treating this record as verified.'}</p><div className="snapshot-checks"><span className={evidence.originalHash === evidence.currentHash ? 'is-ok' : 'is-bad'}>{evidence.originalHash === evidence.currentHash ? <CheckCircle2 size={14} /> : <ShieldAlert size={14} />}Content hash {evidence.originalHash === evidence.currentHash ? 'matches' : 'differs'}</span><span className={evidence.auditChainValid ? 'is-ok' : 'is-bad'}>{evidence.auditChainValid ? <CheckCircle2 size={14} /> : <ShieldAlert size={14} />}Audit chain {evidence.auditChainValid ? 'valid' : 'broken'}</span></div><button className="button button--secondary button--full" type="button" onClick={onVerify} disabled={busy}>{busy ? <><LoaderCircle size={15} className="spin" />Recomputing chain…</> : <><Fingerprint size={15} />Verify against backend</>}</button></section>;
+}
+
+function LatestEvent({ evidence, onNavigate }) {
+  const event = evidence.timeline?.[0] || evidence.chain?.at(-1);
+  const Icon = ACTION_ICONS[event?.action] || Activity;
+  return <section className="latest-event card"><SectionHeading eyebrow="LATEST CUSTODY EVENT" title="Most recent activity" action={<button className="icon-button" type="button" aria-label="Open full timeline" onClick={() => onNavigate('integrity')}><ArrowUpRight size={16} /></button>} />{event ? <div className="latest-event__body"><span className="event-icon event-icon--blue"><Icon size={17} /></span><div><div className="latest-event__top"><strong>{actionLabel(event.action)}</strong><time>{relativeTime(event.at || event.timestamp)}</time></div><p>{event.details || 'No event details provided.'}</p><span className="event-actor"><UserRound size={12} />{event.actor || event.officer || 'Authorised Officer'} <code>{event.badge || '—'}</code></span><HashChip value={event.eventHash || event.hash} label="Event hash" /></div></div> : <p className="muted-copy">Once the first officer event is recorded, it will appear here for the next reviewer.</p>}</section>;
+}
+
+function EvidenceRegister({ records, selectedId, onSelect, search, busy }) {
+  const filtered = useMemo(() => records.filter((item) => `${item.id} ${item.caseId} ${item.name} ${item.custodyHolder}`.toLowerCase().includes(search.toLowerCase())), [records, search]);
+  if (!records.length) return <div className="register-empty"><Database size={20} /><strong>Your register is ready for its first record.</strong><span>Upload an evidence file and SAKSHYA will create the first custody entry for you.</span></div>;
+  if (!filtered.length) return <div className="register-empty"><Search size={20} /><strong>We couldn’t find that record.</strong><span>Try a document ID, case reference or file name.</span></div>;
+  return <div className="evidence-table"><div className="evidence-table__head"><span>Record</span><span>Custody</span><span>Chain</span><span>Current state</span><span /></div>{filtered.map((record, index) => <motion.button className={`evidence-row ${selectedId === record.id ? 'is-selected' : ''}`} type="button" key={record.id} onClick={() => onSelect(record.id)} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.035 }} disabled={busy}><span className="evidence-row__record"><span className="table-file-icon"><FileText size={15} /></span><span><strong>{record.name || record.fileName || record.id}</strong><code>{record.id}</code></span></span><span><strong>{record.custodyHolder || '—'}</strong><small>{record.caseId || 'No case ID'}</small></span><span><strong>{record.chainLength ?? record.chain?.length ?? 0} blocks</strong><small>{relativeTime(record.lastActivity)}</small></span><span><StatusBadge status={record.valid === false || record.status === 'compromised' ? 'compromised' : 'verified'} label={record.valid === false || record.status === 'compromised' ? 'COMPROMISED' : 'VALID'} /></span><ChevronRight size={15} /></motion.button>)}</div>;
+}
+
+function Timeline({ evidence, compact = false }) {
+  const events = evidence?.timeline || [...(evidence?.chain || [])].reverse();
+  if (!events.length) return <div className="timeline-empty"><Clock3 size={18} />No custody events returned by the backend.</div>;
+  return <div className={`timeline ${compact ? 'timeline--compact' : ''}`}>{events.map((event, index) => { const compromised = event.compromised || event.verified === false; const Icon = ACTION_ICONS[event.action] || Activity; return <motion.article className={`timeline-item ${compromised ? 'is-compromised' : ''} ${index === 0 ? 'is-latest' : ''}`} key={event.id || `${event.index}-${event.at}`} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.045 }}><div className="timeline-rail"><span className="timeline-node">{compromised ? <ShieldAlert size={15} /> : <Icon size={15} />}</span>{index < events.length - 1 && <i />}</div><div className="timeline-card"><div className="timeline-card__top"><div><span className="block-index">BLOCK {String(event.index ?? index).padStart(2, '0')}</span><strong>{actionLabel(event.action)}</strong></div><div className="timeline-card__right">{index === 0 && <span className="latest-label">LATEST</span>}<time>{formatDate(event.at || event.timestamp, true)}</time></div></div><div className="timeline-card__actor"><span className="avatar avatar--small">{initials(event.actor || event.officer)}</span><span><strong>{event.actor || event.officer || 'Authorised Officer'}</strong><small>{event.role || 'Custody Officer'} · <code>{event.badge || '—'}</code></small></span></div>{!compact && <p>{event.details || 'Custody event recorded.'}</p>}{!compact && event.location && <span className="timeline-location"><Landmark size={12} />{event.location}</span>}<div className="timeline-hashes"><span><small>EVENT HASH</small><HashChip value={event.eventHash || event.hash} label="Event hash" /></span><span><small>PREVIOUS LINK</small><HashChip value={event.previousHash} label="Previous hash" /></span>{compromised && <StatusBadge status="compromised" label="INTEGRITY BREAK" />}</div></div></motion.article>; })}</div>;
+}
+
+function HashChain({ evidence }) {
+  const chain = evidence?.chain || [];
+  if (!chain.length) return <div className="chain-empty"><Network size={20} />The backend returned no chain blocks for this evidence.</div>;
+  return <div className="hash-chain" aria-label="Visual audit chain"><div className="hash-chain__intro"><span><span className="chain-dot chain-dot--ok" />Verified link</span><span><Link2 size={13} />Each block stores the previous event hash</span></div><div className="hash-chain__track">{chain.map((block, index) => { const compromised = block.compromised || block.verified === false; const Icon = ACTION_ICONS[block.action] || Activity; return <div className="hash-chain__unit" key={block.id || `${block.index}-${block.timestamp}`}><div className={`hash-block ${compromised ? 'is-compromised' : ''}`}><div className="hash-block__top"><span>#{String(block.index ?? index).padStart(2, '0')}</span>{compromised ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}</div><Icon size={17} /><strong>{block.action || 'EVENT'}</strong><HashChip value={block.eventHash || block.hash} label="Block hash" /></div>{index < chain.length - 1 && <div className={`hash-connector ${compromised ? 'is-compromised' : ''}`}><span /><Link2 size={13} /></div>}</div>; })}</div></div>;
+}
+
+function IntegrityView({ evidence, verification, busy, onVerify, onTamper, onReset, onNavigate, onSelect, records }) {
+  const status = recordStatus(evidence, verification);
+  return <div className="view-stack"><PageHeader eyebrow="INTEGRITY CONTROL CENTRE" title="Verify the chain, prove the state" description="Recompute the evidence fingerprint and every linked custody event against the live backend response." actions={<div className="button-row"><button className="button button--primary" type="button" onClick={onVerify} disabled={!evidence || busy.verify}>{busy.verify ? <><LoaderCircle size={15} className="spin" />Checking every link…</> : <><Fingerprint size={15} />Verify integrity</>}</button>{evidence && <button className="button button--demo" type="button" onClick={onTamper} disabled={busy.tamper}><ShieldAlert size={15} />Simulate tamper <small>DEMO</small></button>}</div>} />{!evidence ? <NoEvidencePanel records={records} onSelect={onSelect} onNavigate={onNavigate} /> : <><VerificationResult evidence={evidence} result={verification} status={status} busy={busy.verify} /><section className="chain-map-section card"><SectionHeading eyebrow="CRYPTOGRAPHIC LINK MAP" title="Every event remembers the one before it" description="The visual chain is rendered from the backend chain array; a compromised block and its downstream links are marked in red." /><HashChain evidence={evidence} /></section><section className="timeline-section card"><SectionHeading eyebrow="FULL CUSTODY TIMELINE" title={`${evidence.chainLength ?? evidence.chain?.length ?? 0} linked events`} description="Actor, badge, action, timestamp, location and hash metadata returned by the evidence API." action={status === 'compromised' ? <button className="button button--quiet" type="button" onClick={onReset} disabled={busy.reset}>{busy.reset ? <LoaderCircle size={14} className="spin" /> : <RotateCcw size={14} />}Reset demo record</button> : null} /><Timeline evidence={evidence} /></section><RiskSignals evidence={evidence} /></>}</div>;
+}
+
+function VerificationResult({ evidence, result, status, busy }) {
+  const compromised = status === 'compromised';
+  const verified = result?.valid === true;
+  return <section className={`verification-result verification-result--${busy ? 'checking' : verified ? 'verified' : compromised ? 'compromised' : 'pending'}`} aria-live="polite"><div className="verification-result__icon">{busy ? <LoaderCircle size={27} className="spin" /> : verified ? <CheckCircle2 size={27} /> : compromised ? <ShieldAlert size={27} /> : <Fingerprint size={27} />}</div><div className="verification-result__copy"><span className="eyebrow">BACKEND VERIFICATION RESULT</span><h2>{busy ? 'Recomputing integrity…' : verified ? 'CHAIN VALID' : compromised ? 'TAMPERING DETECTED' : 'VERIFICATION REQUIRED'}</h2><p>{busy ? 'SHA-256 fingerprint, current hash and audit-chain links are being checked.' : verified ? 'Hash and audit chain match the live evidence record.' : compromised ? (result?.details || 'The returned evidence no longer matches its sealed state.') : 'No green result is shown until POST /api/evidence/:id/verify confirms the chain.'}</p>{result?.brokenAtIndex !== null && result?.brokenAtIndex !== undefined && !verified && <span className="break-callout"><ShieldAlert size={14} /> Broken block {String(result.brokenAtIndex).padStart(2, '0')} {result.alertMessage ? `· ${result.alertMessage}` : ''}</span>}</div><div className="verification-result__meta"><span>Evidence hash</span><HashChip value={evidence?.currentHash} label="Current evidence hash" /><span>Audit chain</span><StatusBadge status={evidence?.auditChainValid ? 'verified' : 'compromised'} label={evidence?.auditChainValid ? 'VALID' : 'BROKEN'} /></div></section>;
+}
+
+function RiskSignals({ evidence }) {
+  const flags = evidence?.anomalyFlags || {};
+  const signals = [{ key: 'hashMismatch', severity: 'critical', title: 'Evidence hash mismatch', text: 'Current content hash differs from the original sealed fingerprint.', icon: ShieldAlert }, { key: 'brokenAuditChain', severity: 'critical', title: 'Broken audit-chain link', text: 'An event hash or previous-hash pointer failed validation.', icon: Link2 }, { key: 'offHoursActivity', severity: 'medium', title: 'Off-hours activity', text: 'At least one custody event occurred outside the monitored operating window.', icon: Clock3 }].filter((signal) => flags[signal.key]);
+  return <section className="risk-section card"><SectionHeading eyebrow="SECURITY MONITORING" title="AI-Assisted Risk Signals" description="MVP uses explainable rule-based detection; human review remains required." action={<span className="signal-source"><Activity size={13} />Backend flags</span>} />{signals.length ? <div className="risk-list">{signals.map((signal) => { const Icon = signal.icon; return <article className={`risk-row risk-row--${signal.severity}`} key={signal.key}><span className="risk-row__icon"><Icon size={16} /></span><div><div><strong>{signal.title}</strong><span className={`severity severity--${signal.severity}`}>{signal.severity}</span></div><p>{signal.text}</p><code>{signal.key}: true</code></div><button className="icon-button" type="button" aria-label="Open risk detail"><ArrowUpRight size={15} /></button></article>; })}</div> : <div className="no-risk"><span><CheckCircle2 size={18} /></span><div><strong>No active risk signals returned.</strong><p>The selected record currently reports a clean evidence hash, valid audit chain and no off-hours flag.</p></div></div>}</section>;
+}
+
+function NoEvidencePanel({ records, onSelect, onNavigate }) {
+  return <section className="no-evidence card"><span className="empty-selection__mark"><Fingerprint size={27} /></span><div><span className="eyebrow">NO ACTIVE EVIDENCE</span><h2>Choose a record when you’re ready to review it.</h2><p>Upload a new file or open one of the live records loaded from the backend register. SAKSHYA will show you exactly what happened and who handled it.</p><div className="button-row"><button className="button button--primary" type="button" onClick={() => onNavigate('upload')}><UploadCloud size={15} />Seal new evidence</button>{records.slice(0, 3).map((record) => <button className="button button--secondary" type="button" key={record.id} onClick={() => onSelect(record.id)}>{record.id} <ArrowRight size={13} /></button>)}</div></div></section>;
+}
+
+function UploadView({ form, errors, onChange, onSubmit, onChooseFile, dragActive, setDragActive, fileInputRef, busy, onBack }) {
+  const setField = (key, value) => onChange((current) => ({ ...current, [key]: value }));
+  return <div className="view-stack"><PageHeader eyebrow="EVIDENCE INTAKE" title="Seal new evidence" description="Upload the source file and register its first custody event on the live SAKSHYA backend." actions={<button className="button button--quiet" type="button" onClick={onBack}><ArrowRight size={14} className="rotate-180" />Back to command centre</button>} /><div className="upload-layout"><section className="upload-panel card"><form onSubmit={onSubmit} noValidate><div className="form-section"><SectionHeading eyebrow="01 · SOURCE FILE" title="Select evidence file" description="Files are hashed by the backend before the record is returned." /><div className={`dropzone ${dragActive ? 'is-dragging' : ''} ${errors.file ? 'has-error' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={(event) => { event.preventDefault(); setDragActive(false); }} onDrop={(event) => { event.preventDefault(); setDragActive(false); onChooseFile(event.dataTransfer.files?.[0]); }}><input ref={fileInputRef} type="file" onChange={(event) => onChooseFile(event.target.files?.[0])} aria-label="Choose evidence file" /><span className="dropzone__icon"><UploadCloud size={24} /></span><strong>{form.file ? form.file.name : 'Drop evidence file here'}</strong><span>{form.file ? `${formatSize(form.file.size)} · ${form.file.type || 'application/octet-stream'}` : 'or browse from this device · maximum 25 MB'}</span><button className="button button--secondary" type="button" onClick={() => fileInputRef.current?.click()}><FolderOpen size={14} />{form.file ? 'Choose a different file' : 'Browse file'}</button></div>{errors.file && <FieldError text={errors.file} />}{form.file && <div className="selected-file"><span className="selected-file__icon"><FileText size={16} /></span><div><strong>{form.file.name}</strong><small>{formatSize(form.file.size)} · {form.file.type || 'Unknown MIME type'}</small></div><button className="icon-button" type="button" aria-label="Remove selected file" onClick={() => { onChange((current) => ({ ...current, file: null })); if (fileInputRef.current) fileInputRef.current.value = ''; }}><X size={15} /></button></div>}</div><div className="form-section"><SectionHeading eyebrow="02 · CUSTODY METADATA" title="Register first officer event" description="These values become part of the first audit entry and evidence record." /><div className="form-grid form-grid--two"><FormField label="Case ID" required error={errors.caseId}><input value={form.caseId} onChange={(event) => setField('caseId', event.target.value)} placeholder="CASE/DEL/26-0001" autoComplete="off" />{errors.caseId && <FieldError text={errors.caseId} />}</FormField><FormField label="Officer name" required error={errors.officer}><input value={form.officer} onChange={(event) => setField('officer', event.target.value)} placeholder="Officer registering evidence" autoComplete="name" />{errors.officer && <FieldError text={errors.officer} />}</FormField><FormField label="Classification"><select value={form.classification} onChange={(event) => setField('classification', event.target.value)}><option>Sensitive</option><option>Normal</option><option>Classified</option></select></FormField><FormField label="Evidence type"><input value="Digital evidence file" readOnly /></FormField></div><FormField label="Description"><textarea rows="3" value={form.description} onChange={(event) => setField('description', event.target.value)} placeholder="Briefly describe the evidence and its relevance to the case." /></FormField></div><div className="form-submit"><span><LockKeyhole size={14} />The backend will create the SHA-256 source hash and first audit block.</span><button className="button button--primary" type="submit" disabled={busy || !form.file}>{busy ? <><LoaderCircle size={16} className="spin" />Sealing file…</> : <><Fingerprint size={16} />Seal evidence on backend <ArrowRight size={14} /></>}</button></div></form></section><aside className="upload-aside"><ProtocolCard /><UploadNote /></aside></div></div>;
+}
+
+function FormField({ label, required, children }) {
+  return <label className="form-field"><span>{label}{required && <b>*</b>}</span>{children}</label>;
+}
+
+function FieldError({ text }) {
+  return <small className="field-error"><CircleAlert size={12} />{text}</small>;
+}
+
+function ProtocolCard() {
+  return <section className="protocol-card card"><span className="eyebrow">SEAL PROTOCOL</span><h2>What happens after submit?</h2><ol><li><span>01</span><div><strong>Source hash</strong><p>Backend computes a SHA-256 digest from the uploaded file bytes.</p></div></li><li><span>02</span><div><strong>Audit block</strong><p>Officer, time, case and file hash become the first custody event.</p></div></li><li><span>03</span><div><strong>Record returned</strong><p>Frontend selects the live response and renders its chain immediately.</p></div></li></ol><div className="protocol-foot"><ShieldCheck size={14} />No client-side evidence result is fabricated.</div></section>;
+}
+
+function UploadNote() {
+  return <section className="upload-note card"><Info size={17} /><div><strong>A clear handover for the next officer</strong><p>Use a small PDF, image or text file. Add enough context for another authorised reviewer to understand why this evidence matters.</p></div></section>;
+}
+
+function TransferView({ evidence, form, onChange, challenge, onRequestOtp, onSubmit, busy, onNavigate }) {
+  if (!evidence) return <div className="view-stack"><PageHeader eyebrow="SECURE CUSTODY HANDOVER" title="Transfer custody" description="When you are ready, select an evidence record to begin an OTP-protected handover." /><NoEvidencePanel records={[]} onSelect={() => {}} onNavigate={onNavigate} /></div>;
+  return <div className="view-stack"><PageHeader eyebrow="SECURE CUSTODY HANDOVER" title="Transfer custody" description="Request a backend OTP, confirm the receiving officer, then seal the handover in the audit chain." actions={<StatusBadge status="verified" label="OTP REQUIRED" />} /><div className="transfer-layout"><section className="transfer-panel card"><div className="transfer-subject"><span className="file-symbol file-symbol--small"><FileText size={19} /></span><div><span className="eyebrow">SELECTED EVIDENCE</span><strong>{evidence.name || evidence.id}</strong><code>{evidence.id} · {evidence.caseId}</code></div><StatusBadge status={evidence.valid === false ? 'compromised' : 'sealed'} /></div><div className="handover-steps"><HandoverStep number="01" title="Receiving officer" active={!challenge} done={Boolean(challenge)} /><HandoverStep number="02" title="OTP verification" active={Boolean(challenge)} done={false} /><HandoverStep number="03" title="Chain event sealed" active={false} done={false} /></div><form onSubmit={onSubmit}><div className="form-grid form-grid--two"><FormField label="Current custody holder"><input value={evidence.custodyHolder || '—'} readOnly /></FormField><FormField label="Receiving officer" required><input value={form.recipient} onChange={(event) => onChange((current) => ({ ...current, recipient: event.target.value }))} placeholder="Name or officer ID" autoComplete="off" /></FormField></div><div className="transfer-security-card"><div className="transfer-security-card__icon"><KeyRound size={17} /></div><div><strong>Backend OTP challenge</strong><p>Confirm the receiving officer's identity before the handover. In this MVP, the backend returns the code for judge demonstration.</p>{challenge && <div className="otp-return"><span>DEMO OTP</span><code>{challenge.otp}</code><small>expires {formatDate(challenge.expiresAt)}</small></div>}</div><button className="button button--secondary" type="button" onClick={onRequestOtp} disabled={busy.otp || !form.recipient.trim()}>{busy.otp ? <LoaderCircle size={14} className="spin" /> : <KeyRound size={14} />}{challenge ? 'Request new OTP' : 'Request OTP'}</button></div><FormField label="6-digit verification code" required><input className="otp-input" value={form.otp} onChange={(event) => onChange((current) => ({ ...current, otp: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" pattern="[0-9]{6}" placeholder="· · · · · ·" disabled={!challenge} autoComplete="one-time-code" /></FormField><div className="form-submit"><span><ShieldCheck size={14} />Transfer writes a new TRANSFERRED event to the live audit chain.</span><button className="button button--primary" type="submit" disabled={busy.transfer || !challenge || form.otp.length !== 6}>{busy.transfer ? <><LoaderCircle size={15} className="spin" />Sealing handover…</> : <><Send size={15} />Confirm custody transfer <ArrowRight size={14} /></>}</button></div></form></section><aside className="transfer-aside"><section className="custody-card card"><span className="eyebrow">CURRENT STATE</span><h2>{evidence.custodyHolder || '—'}</h2><p>is the recorded custody holder before this handover.</p><div className="custody-card__hash"><span>AUDIT HEAD</span><HashChip value={evidence.auditChainHead} label="Audit chain head" /></div></section><section className="handover-note card"><ArrowLeftRight size={17} /><div><strong>Dual accountability</strong><p>Take a moment to confirm the person standing on the other side of this handover. Use the recipient's official name or badge ID; both identities are preserved in the custody chain.</p></div></section></aside></div></div>;
+}
+
+function HandoverStep({ number, title, active, done }) {
+  return <div className={`handover-step ${active ? 'is-active' : ''} ${done ? 'is-done' : ''}`}><span>{done ? <Check size={12} /> : number}</span><strong>{title}</strong></div>;
+}
+
+function ReportView({ evidence, report, onLoad, onDownload, busy, onNavigate }) {
+  if (!evidence) return <div className="view-stack"><PageHeader eyebrow="COURT-READY DOCUMENTATION" title="Forensic report" description="Select a live evidence record before generating its backend report." /><NoEvidencePanel records={[]} onSelect={() => {}} onNavigate={onNavigate} /></div>;
+  const assessment = report?.integrityAssessment;
+  return <div className="view-stack"><PageHeader eyebrow="COURT-READY DOCUMENTATION" title="Forensic report generator" description="Preview the backend-generated evidence report, then download the returned JSON package for case documentation." actions={<div className="button-row"><button className="button button--secondary" type="button" onClick={onLoad} disabled={busy}>{busy ? <><LoaderCircle size={15} className="spin" />Generating…</> : <><RefreshCw size={15} />Refresh preview</>}</button><button className="button button--primary" type="button" onClick={onDownload} disabled={busy}><Download size={15} />Download Court-Ready Report</button></div>} /><div className="report-layout"><section className="report-status card"><span className="eyebrow">REPORT STATUS</span><div className="report-status__verdict"><span className={`verdict-mark ${assessment?.overallValid === false ? 'is-bad' : assessment?.overallValid === true ? 'is-good' : ''}`}>{assessment?.overallValid === false ? <ShieldAlert size={22} /> : assessment?.overallValid === true ? <CheckCircle2 size={22} /> : <FileClock size={22} />}</span><div><h2>{assessment ? assessment.overallValid ? 'Integrity confirmed' : 'Review required' : 'Preview not generated'}</h2><p>{assessment ? assessment.overallValid ? 'The report reflects a matching content hash and valid audit chain.' : 'The report preserves the incident state and broken-block evidence for review.' : 'Generate the live report to populate its assessment and custody chain.'}</p></div></div><div className="report-check-list"><span className={assessment?.evidenceHashValid ? 'is-good' : ''}><CheckCircle2 size={14} />Content-hash match <b>{assessment ? assessment.evidenceHashValid ? 'YES' : 'NO' : '—'}</b></span><span className={assessment?.auditChainValid ? 'is-good' : ''}><Link2 size={14} />Audit-chain validity <b>{assessment ? assessment.auditChainValid ? 'VALID' : 'BROKEN' : '—'}</b></span><span><FileCheck2 size={14} />Report endpoint <b>{report ? 'READY' : 'WAITING'}</b></span></div><div className="signature-badge"><BadgeCheck size={17} /><div><strong>Backend attestation present</strong><span>{report?.attestation || 'Generated from the live evidence report endpoint.'}</span></div></div></section><section className="report-paper-wrap"><ReportPaper report={report} evidence={evidence} /></section></div></div>;
+}
+
+function ReportPaper({ report, evidence }) {
+  const subject = report?.evidence || evidence;
+  const assessment = report?.integrityAssessment;
+  const events = subject?.timeline || [];
+  return <article className="report-paper"><div className="report-paper__masthead"><OfficialEmblem small /><div><span>GOVERNMENT OF INDIA</span><strong>MINISTRY OF HOME AFFAIRS</strong><small>SAKSHYA · DIGITAL EVIDENCE INTEGRITY PLATFORM</small></div><span className="report-classification">{subject?.classification || 'CONTROLLED'}<small>OFFICIAL RECORD</small></span></div><div className="report-rule" /><div className="report-paper__title"><span>FORENSIC EVIDENCE REPORT</span><h2>{report?.reportType || 'Sakshya Court-Ready Forensic Evidence Report'}</h2><p>{report ? `Generated ${formatDate(report.generatedAt, true)}` : 'Generate preview from the live report endpoint.'}</p></div><div className="report-facts"><Fact label="Evidence ID" value={subject?.id} mono /><Fact label="Case ID" value={subject?.caseId} mono /><Fact label="File" value={subject?.name || subject?.fileName} /><Fact label="Custody holder" value={subject?.custodyHolder} /></div><div className="report-section"><span>01</span><div><h3>Integrity assessment</h3><p>{assessment ? assessment.overallValid ? 'The evidence content hash equals the sealed source hash and all audit events recompute successfully.' : 'The evidence record requires review because the content hash or linked audit chain does not match the sealed state.' : 'The integrity assessment will appear after the backend report is generated.'}</p><div className="report-assessment-grid"><span><small>CONTENT HASH</small><b>{assessment ? assessment.evidenceHashValid ? 'MATCH' : 'MISMATCH' : '—'}</b></span><span><small>AUDIT CHAIN</small><b>{assessment ? assessment.auditChainValid ? 'VALID' : 'BROKEN' : '—'}</b></span><span><small>VERDICT</small><b>{assessment ? assessment.overallValid ? 'VERIFIED' : 'COMPROMISED' : '—'}</b></span></div></div></div><div className="report-section"><span>02</span><div><h3>Custody chain</h3><p>Chronological events returned by the evidence service, presented newest first.</p><div className="report-table"><div className="report-table__row report-table__row--head"><span>Block</span><span>Action / actor</span><span>Timestamp</span><span>Event hash</span></div>{events.length ? events.map((event) => <div className="report-table__row" key={event.id || `${event.index}-${event.at}`}><span className="mono">{String(event.index ?? '—').padStart(2, '0')}</span><span><b>{actionLabel(event.action)}</b><small>{event.actor || event.officer || '—'} · {event.badge || '—'}</small></span><span>{formatDate(event.at || event.timestamp)}</span><span><HashChip value={event.eventHash || event.hash} label="Report event hash" /></span></div>) : <div className="report-table__empty">No timeline returned yet.</div>}</div></div></div><div className="report-section"><span>03</span><div><h3>Cryptographic proof</h3><div className="report-hashes"><span><small>ORIGINAL SHA-256</small><HashChip value={subject?.originalHash} label="Original hash" full /></span><span><small>CURRENT SHA-256</small><HashChip value={subject?.currentHash} label="Current hash" full /></span><span><small>AUDIT CHAIN HEAD</small><HashChip value={subject?.auditChainHead} label="Audit head" full /></span></div></div></div><div className="report-signature"><div><span className="signature-line" /><small>Authorised SAKSHYA integrity service</small><strong>Digital verification record</strong></div><div className="report-stamp"><CheckCircle2 size={20} /><span>{assessment?.overallValid ? 'VERIFIED' : 'CONTROLLED'}</span></div></div><footer>SAKSHYA · Secure evidence custody grid · This prototype report is generated from the in-memory backend service.</footer></article>;
+}
+
+function Footer() {
+  return <footer className="app-footer"><div><OfficialEmblem small /><span><strong>SAKSHYA</strong> · Digital Evidence Integrity Platform</span></div><span>Smart India Hackathon 2026 · SIH26190 · Ministry of Home Affairs</span></footer>;
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
   render() {
-    if (this.state.hasError) return <div className="error-screen"><ShieldAlert size={32} /><h1>SAKSHYA encountered an issue.</h1><p>Retry the workspace to restore the secure evidence view.</p><button className="button button--primary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />Retry workspace</button></div>;
+    if (this.state.hasError) return <div className="error-screen"><ShieldAlert size={32} /><span className="eyebrow">SAKSHYA WORKSPACE</span><h1>Something interrupted the evidence view.</h1><p>Reload the workspace to reconnect to the live command centre.</p><button className="button button--primary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />Retry workspace</button></div>;
     return this.props.children;
   }
 }
