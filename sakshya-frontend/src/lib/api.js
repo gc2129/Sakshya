@@ -1,10 +1,8 @@
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim();
 
-// Local development remains convenient, but a production build must be
-// pointed at an explicit deployed API. This prevents a hosted UI from
-// silently trying to call localhost on a judge's or officer's machine.
-const API_BASE = (configuredApiUrl || (import.meta.env.DEV ? 'http://localhost:5000/api' : ''))
-  .replace(/\/+$/, '');
+// Every environment must provide the API explicitly. A hosted build must
+// never silently call a developer machine on a judge's or officer's device.
+const API_BASE = configuredApiUrl.replace(/\/+$/, '');
 
 async function request(path, options = {}) {
   if (!API_BASE) {
