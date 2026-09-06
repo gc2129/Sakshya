@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import Joyride from 'react-joyride';
@@ -77,6 +77,10 @@ import {
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+// Hash routing keeps every screen refreshable on a static GitHub Pages host.
+// Local development continues to use clean browser URLs.
+const Router = window.location.hostname.endsWith('github.io') ? HashRouter : BrowserRouter;
 
 function verifyLocalChain(document) {
   const brokenAtIndex = document?.chain?.findIndex((entry) => entry.compromised || entry.verified === false) ?? -1;
@@ -242,7 +246,7 @@ function App() {
     setDocuments((current) => current.map((item) => item.docId === docId ? { ...item, status: 'valid', chain: JSON.parse(JSON.stringify(baseline)), chainLength: baseline.length } : item));
   }
 
-  return <BrowserRouter><Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} /><AppErrorBoundary><AppShell theme={theme} onThemeChange={setTheme} highContrast={highContrast} onContrastChange={() => setHighContrast((value) => !value)} apiOnline={apiOnline}><Routes><Route path="/" element={<LandingPage documents={documents} />} /><Route path="/dashboard" element={<DashboardPage documents={documents} onRefresh={() => setRefreshToken((value) => value + 1)} lastSync={lastSync} />} /><Route path="/document/:docId" element={<DocumentDetailPage documents={documents} onAddAction={addAction} onVerify={verifyDocument} onTamper={tamperDocument} />} /><Route path="/upload" element={<UploadPage onUpload={uploadDocument} />} /><Route path="/verify" element={<VerifyPage documents={documents} onVerify={verifyDocument} />} /><Route path="/demo" element={<DemoPage documents={documents} onTamper={tamperDocument} onRestore={restoreDocument} />} /><Route path="/transfer" element={<TransferPage documents={documents} onAddAction={addAction} />} /><Route path="/anomalies" element={<AnomaliesPage documents={documents} />} /><Route path="/reports" element={<ReportsPage documents={documents} />} /><Route path="/admin" element={<AdminPage documents={documents} />} /><Route path="*" element={<NotFoundPage />} /></Routes></AppShell></AppErrorBoundary></BrowserRouter>;
+  return <Router><Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} /><AppErrorBoundary><AppShell theme={theme} onThemeChange={setTheme} highContrast={highContrast} onContrastChange={() => setHighContrast((value) => !value)} apiOnline={apiOnline}><Routes><Route path="/" element={<LandingPage documents={documents} />} /><Route path="/dashboard" element={<DashboardPage documents={documents} onRefresh={() => setRefreshToken((value) => value + 1)} lastSync={lastSync} />} /><Route path="/document/:docId" element={<DocumentDetailPage documents={documents} onAddAction={addAction} onVerify={verifyDocument} onTamper={tamperDocument} />} /><Route path="/upload" element={<UploadPage onUpload={uploadDocument} />} /><Route path="/verify" element={<VerifyPage documents={documents} onVerify={verifyDocument} />} /><Route path="/demo" element={<DemoPage documents={documents} onTamper={tamperDocument} onRestore={restoreDocument} />} /><Route path="/transfer" element={<TransferPage documents={documents} onAddAction={addAction} />} /><Route path="/anomalies" element={<AnomaliesPage documents={documents} />} /><Route path="/reports" element={<ReportsPage documents={documents} />} /><Route path="/admin" element={<AdminPage documents={documents} />} /><Route path="*" element={<NotFoundPage />} /></Routes></AppShell></AppErrorBoundary></Router>;
 }
 
 function LandingPage({ documents }) {
