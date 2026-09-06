@@ -1,6 +1,6 @@
 # Sakshya backend API
 
-The service stores evidence in memory for the running process. Every uploaded file is sealed with a SHA-256 hash. Every audit entry contains the preceding entry's hash and its own SHA-256 hash, forming a cryptographically linked audit chain.
+The service persists evidence metadata and audit events in local SQLite (`data/sakshya.sqlite` by default), so records survive server restarts. Use `SAKSHYA_DB_PATH` to set a different database path. Raw uploaded file bytes are never stored; the service retains only the file metadata and SHA-256 digest. Every audit entry contains the preceding entry's hash and its own SHA-256 hash, forming a cryptographically linked audit chain.
 
 Base URL: `http://localhost:5000`
 
@@ -31,11 +31,15 @@ Uploads one file as multipart form data. The form field must be named `file`. Fi
 curl -F "file=@evidence.pdf" http://localhost:5000/api/evidence/upload
 ```
 
-Returns `201` and evidence metadata, SHA-256 hashes, anomaly flags, and the audit timeline.
+Returns `201` and stores the evidence metadata, SHA-256 hashes, anomaly flags, and audit timeline in SQLite. The uploaded file contents are not persisted.
 
 ## `GET /api/evidence/:id`
 
 Returns the current evidence record and its audit timeline (newest first).
+
+## Persistent storage
+
+`evidence_records` stores evidence metadata, hashes, custody state, and temporary OTP transfer state. `audit_events` stores the append-only cryptographically linked timeline. The SQLite database and its WAL/SHM files are ignored by Git.
 
 ## `POST /api/evidence/:id/verify`
 

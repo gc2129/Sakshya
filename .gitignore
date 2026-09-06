@@ -1,0 +1,4 @@
+node_modules/
+sakshya-backend/data/*.sqlite
+sakshya-backend/data/*.sqlite-shm
+sakshya-backend/data/*.sqlite-wal
