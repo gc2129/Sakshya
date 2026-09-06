@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import toast from 'react-hot-toast';
 import {
   AlertTriangle,
   BadgeCheck,
@@ -52,9 +53,9 @@ export const shortHash = (value = '') => {
 };
 
 export const motionProps = (delay = 0) => ({
-  initial: { opacity: 0, y: 12 },
+  initial: { opacity: 0, y: 8 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.35, delay, ease: [0.22, 1, 0.36, 1] },
+  transition: { duration: 0.2, delay: Math.min(delay, 0.12), ease: [0.22, 1, 0.36, 1] },
 });
 
 export function BrandMark({ small = false }) {
@@ -91,7 +92,8 @@ export function StatusBadge({ status = 'pending', label, pulse = false }) {
 }
 
 export function RiskBadge({ risk }) {
-  return <span className={cn('risk-badge', `risk-badge--${risk}`)}><span className="risk-dot" />{risk?.[0]?.toUpperCase() + risk?.slice(1)} risk</span>;
+  const label = risk === 'review' ? 'Review signal' : `${risk?.[0]?.toUpperCase() + risk?.slice(1)} risk`;
+  return <span className={cn('risk-badge', `risk-badge--${risk || 'review'}`)}><span className="risk-dot" />{label}</span>;
 }
 
 export function HashChip({ hash, copyable = true, label = 'SHA-256' }) {
@@ -99,15 +101,16 @@ export function HashChip({ hash, copyable = true, label = 'SHA-256' }) {
   async function copyHash() {
     if (!copyable) return;
     try {
-      await navigator.clipboard.writeText(hash);
+      await navigator.clipboard.writeText(String(hash || ''));
       setCopied(true);
+      toast.success('Hash copied to clipboard.', { id: 'sakshya-hash-copy', duration: 1400 });
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // Clipboard permissions are optional in a local demo.
     }
   }
   return (
-    <button className={cn('hash-chip', !copyable && 'hash-chip--static')} onClick={copyHash} title={copyable ? 'Copy full hash' : hash} type="button">
+    <button className={cn('hash-chip', !copyable && 'hash-chip--static')} onClick={copyHash} title={copyable ? (copied ? 'Hash copied to clipboard' : 'Copy full hash') : hash} type="button" aria-label={copyable ? `${label || 'Hash'} ${copied ? 'copied' : 'copy'}` : `${label || 'Hash'} ${shortHash(hash)}`}>
       <Hash size={13} /><span className="hash-chip__label">{label}</span><code>{shortHash(hash)}</code>{copyable && (copied ? <Check size={12} /> : <Copy size={12} />)}
     </button>
   );
@@ -132,9 +135,12 @@ export function PageHeader({ eyebrow, title, description, actions, icon: Icon })
 
 export function StatsCard({ label, value, helper, icon: Icon, tone = 'navy', trend, onClick }) {
   const Component = onClick ? motion.button : motion.article;
+  const trendClass = trend === 'Offline' || trend === 'Unavailable' || trend === '—'
+    ? 'stats-trend--neutral'
+    : trend?.startsWith('-') ? 'stats-trend--down' : 'stats-trend--up';
   return (
     <Component className={cn('stats-card', `stats-card--${tone}`, onClick && 'stats-card--interactive')} onClick={onClick} type={onClick ? 'button' : undefined} {...motionProps(0.06)}>
-      <div className="stats-card__top"><span className="stats-card__icon"><Icon size={18} /></span>{trend && <span className={cn('stats-trend', trend.startsWith('-') ? 'stats-trend--down' : 'stats-trend--up')}>{trend}</span>}</div>
+      <div className="stats-card__top"><span className="stats-card__icon"><Icon size={18} /></span>{trend && <span className={cn('stats-trend', trendClass)}>{trend}</span>}</div>
       <strong>{value}</strong><span className="stats-card__label">{label}</span>{helper && <span className="stats-card__helper">{helper}</span>}
     </Component>
   );
@@ -149,22 +155,23 @@ const actionIcon = { UPLOADED: '↑', VIEWED: '◉', TRANSFERRED: '↔', EDITED:
 export function ActionCard({ entry, isLast = false, expanded: initialExpanded = false }) {
   const [expanded, setExpanded] = useState(initialExpanded);
   const compromised = entry.compromised || entry.verified === false;
+  const verified = !compromised && entry.verified === true;
   return (
     <motion.article className={cn('timeline-entry', compromised && 'timeline-entry--compromised')} {...motionProps(0.04 + (entry.index || 0) * 0.035)}>
       <div className="timeline-entry__rail"><span className="timeline-entry__node">{compromised ? <ShieldAlert size={15} /> : <span>{actionIcon[entry.action] || '•'}</span>}</span>{!isLast && <span className="timeline-entry__line" />}</div>
       <div className="timeline-entry__body">
-        <div className="timeline-entry__topline"><div><span className="timeline-entry__index">BLOCK {String(entry.index).padStart(2, '0')}</span><h3>{entry.action.replaceAll('_', ' ')}</h3></div><div className="timeline-entry__state">{compromised ? <StatusBadge status="compromised" label="INTEGRITY COMPROMISED" pulse /> : <StatusBadge status="verified" />}</div></div>
+        <div className="timeline-entry__topline"><div><span className="timeline-entry__index">BLOCK {String(entry.index).padStart(2, '0')}</span><h3>{entry.action.replaceAll('_', ' ')}</h3></div><div className="timeline-entry__state">{compromised ? <StatusBadge status="compromised" label="INTEGRITY COMPROMISED" pulse /> : verified ? <StatusBadge status="verified" /> : <StatusBadge status="pending" label="Verification not returned" />}</div></div>
         <div className="timeline-entry__meta"><span>{formatTime(entry.timestamp)}</span><span className="meta-separator">•</span><span>{entry.officer}</span><span className="meta-separator">•</span><code>{entry.badge}</code></div>
         <p>{entry.details}</p>
         <div className="timeline-entry__footer"><HashChip hash={entry.hash} /><button className="text-button" type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide block data' : 'View block data'}{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button></div>
-        <AnimatePresence initial={false}>{expanded && <motion.div className="block-data" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}><div><span>Officer role</span><strong>{entry.role || 'Authorised officer'}</strong></div><div><span>Location</span><strong>{entry.location || 'Registered facility'}</strong></div><div><span>Previous hash</span><code>{entry.previousHash || 'GENESIS'}</code></div><div><span>Verification</span><strong className={compromised ? 'text-danger' : 'text-success'}>{compromised ? 'Hash mismatch' : 'Hash match confirmed'}</strong></div></motion.div>}</AnimatePresence>
+        <AnimatePresence initial={false}>{expanded && <motion.div className="block-data" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}><div><span>Officer role</span><strong>{entry.role || 'Authorised officer'}</strong></div><div><span>Location</span><strong>{entry.location || 'Not returned by backend'}</strong></div><div><span>Previous hash</span><code>{entry.previousHash || 'GENESIS'}</code></div><div><span>Verification</span><strong className={compromised ? 'text-danger' : verified ? 'text-success' : ''}>{compromised ? 'Hash mismatch' : verified ? 'Hash match confirmed' : 'Verification not returned'}</strong></div></motion.div>}</AnimatePresence>
       </div>
     </motion.article>
   );
 }
 
 export function TimelineComponent({ chain = [], compact = false }) {
-  return <div className={cn('timeline', compact && 'timeline--compact')}>{chain.map((entry, index) => <ActionCard key={`${entry.index}-${entry.timestamp}`} entry={entry} isLast={index === chain.length - 1} />)}</div>;
+  return <div className={cn('timeline', compact && 'timeline--compact')}>{chain.length ? chain.map((entry, index) => <ActionCard key={`${entry.index}-${entry.timestamp}`} entry={entry} isLast={index === chain.length - 1} />) : <EmptyState icon={Clock3} title="No custody events" text="The backend has not returned a timeline for this record." />}</div>;
 }
 
 export function HashChainVisualizer({ chain = [], compact = false, animated = true }) {
@@ -178,18 +185,21 @@ export function HashChainVisualizer({ chain = [], compact = false, animated = tr
 }
 
 export function VerificationResult({ result, busy = false, onVerify }) {
-  const valid = result?.valid;
+  const valid = result?.valid === true;
+  const invalid = result?.valid === false;
   return (
-    <motion.section className={cn('verification-result', valid ? 'verification-result--valid' : 'verification-result--bad')} animate={busy ? { opacity: [0.7, 1, 0.7] } : { opacity: 1 }} transition={busy ? { repeat: Infinity, duration: 1.15 } : { duration: 0.3 }}>
-      <div className="verification-result__icon">{busy ? <CircleDashed className="spin" size={34} /> : valid ? <ShieldCheck size={36} /> : <ShieldAlert size={36} />}</div>
-      <div className="verification-result__copy"><span className="section-eyebrow">CHAIN INTEGRITY STATUS</span><h2>{busy ? 'VERIFYING CHAIN…' : valid ? 'CHAIN VALID' : 'TAMPERING DETECTED'}</h2><p>{busy ? 'Recomputing each block and comparing linked hashes.' : result?.details || (valid ? 'All custody records are intact and cryptographically linked.' : 'The evidence history no longer matches its signed hash chain.')}</p></div>
+    <motion.section className={cn('verification-result', valid && 'verification-result--valid', invalid && 'verification-result--bad', !valid && !invalid && 'verification-result--pending')} animate={busy ? { opacity: [0.7, 1, 0.7] } : { opacity: 1 }} transition={busy ? { repeat: Infinity, duration: 1.15 } : { duration: 0.2 }}>
+      <div className="verification-result__icon">{busy ? <CircleDashed className="spin" size={34} /> : valid ? <ShieldCheck size={36} /> : invalid ? <ShieldAlert size={36} /> : <CircleDashed size={36} />}</div>
+      <div className="verification-result__copy"><span className="section-eyebrow">CHAIN INTEGRITY STATUS</span><h2>{busy ? 'VERIFYING CHAIN…' : valid ? 'CHAIN VALID' : invalid ? 'TAMPERING DETECTED' : 'READY TO VERIFY'}</h2><p>{busy ? 'Recomputing each block and comparing linked hashes.' : result?.details || (valid ? 'All custody records are intact and cryptographically linked.' : invalid ? 'The evidence history no longer matches its signed hash chain.' : 'Run a backend verification before treating this record as verified.')}</p></div>
       {onVerify && <button className="button button--secondary" type="button" onClick={onVerify} disabled={busy}>{busy ? 'Checking…' : 'Verify again'}</button>}
     </motion.section>
   );
 }
 
 export function IntegrityMeter({ value = 100, label = 'Chain integrity' }) {
-  return <div className="integrity-meter"><div className="integrity-meter__labels"><span>{label}</span><strong className={value < 70 ? 'text-danger' : value < 100 ? 'text-warning' : 'text-success'}>{value}%</strong></div><div className="meter-track"><motion.span initial={{ width: 0 }} animate={{ width: `${value}%` }} transition={{ duration: 0.8 }} className={cn(value < 70 ? 'meter-fill--danger' : value < 100 ? 'meter-fill--warning' : 'meter-fill--success')} /></div><small>{value === 100 ? 'All linked records verified' : 'Review required before court submission'}</small></div>;
+  const numericValue = Number.isFinite(value) ? value : null;
+  const displayValue = numericValue === null ? '—' : `${numericValue}%`;
+  return <div className="integrity-meter"><div className="integrity-meter__labels"><span>{label}</span><strong className={numericValue === null ? '' : numericValue < 70 ? 'text-danger' : numericValue < 100 ? 'text-warning' : 'text-success'}>{displayValue}</strong></div><div className="meter-track"><motion.span initial={{ width: 0 }} animate={{ width: `${numericValue ?? 0}%` }} transition={{ duration: 0.2 }} className={cn(numericValue === null ? 'meter-fill--pending' : numericValue < 70 ? 'meter-fill--danger' : numericValue < 100 ? 'meter-fill--warning' : 'meter-fill--success')} /></div><small>{numericValue === null ? 'Awaiting backend verification' : numericValue === 100 ? 'All linked records verified' : 'Review required before court submission'}</small></div>;
 }
 
 export function Modal({ title, eyebrow, onClose, children, wide = false }) {
@@ -201,5 +211,16 @@ export function EmptyState({ icon: Icon = Terminal, title, text }) {
 }
 
 export function CopyableValue({ children }) {
-  return <button className="copyable-value" type="button" onClick={() => navigator.clipboard?.writeText(String(children))}><code>{children}</code><Copy size={12} /></button>;
+  const [copied, setCopied] = useState(false);
+  async function copyValue() {
+    try {
+      await navigator.clipboard.writeText(String(children));
+      setCopied(true);
+      toast.success('Identifier copied to clipboard.', { id: 'sakshya-identifier-copy', duration: 1400 });
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard permissions are optional in a local demo.
+    }
+  }
+  return <button className="copyable-value" type="button" onClick={copyValue} title={copied ? 'Identifier copied' : 'Copy identifier'} aria-label={copied ? 'Identifier copied' : 'Copy identifier'}><code>{children}</code>{copied ? <Check size={12} /> : <Copy size={12} />}</button>;
 }
