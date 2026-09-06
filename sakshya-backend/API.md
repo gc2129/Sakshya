@@ -2,18 +2,33 @@
 
 The service stores evidence in memory for the running process. Every uploaded file is sealed with a SHA-256 hash. Every audit entry contains the preceding entry's hash and its own SHA-256 hash, forming a cryptographically linked audit chain.
 
-Base URL: `http://localhost:3001`
+Base URL: `http://localhost:5000`
 
 ## `GET /api/health`
 
-Returns service status and the configured upload limit.
+Returns service status, the configured upload limit, and the seeded document count.
+
+## Frontend-compatible custody routes
+
+These routes are used by the React command centre:
+
+- `GET /api/documents` — list all records with `valid`/`compromised` status.
+- `POST /api/documents/upload` — register JSON metadata without a file.
+- `GET /api/documents/:id/chain` — return the full chronological chain.
+- `POST /api/documents/:id/verify` — verify and append an integrity event.
+- `POST /api/documents/:id/action` — append `VIEWED`, `EDITED`, or `COURT_ACCESSED`.
+- `POST /api/documents/:id/simulate-tamper` — demo-only block mutation.
+- `POST /api/documents/:id/reset-demo` — restore the pre-demo baseline.
+- `GET /api/documents/:id/report` — return a court-ready JSON report.
+
+For `TRANSFERRED`, the action body must include `fromOfficer`, `toOfficer`, `fromOtp`, and `toOtp`; both OTP values are any four-digit demo strings.
 
 ## `POST /api/evidence/upload`
 
 Uploads one file as multipart form data. The form field must be named `file`. Files larger than 25 MB receive `413` with a clear error.
 
 ```bash
-curl -F "file=@evidence.pdf" http://localhost:3001/api/evidence/upload
+curl -F "file=@evidence.pdf" http://localhost:5000/api/evidence/upload
 ```
 
 Returns `201` and evidence metadata, SHA-256 hashes, anomaly flags, and the audit timeline.
