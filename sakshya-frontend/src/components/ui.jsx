@@ -144,7 +144,7 @@ export function LoadingSkeleton({ lines = 4 }) {
   return <div className="loading-skeleton" aria-label="Loading"><span className="skeleton-block skeleton-block--wide" />{Array.from({ length: lines }).map((_, index) => <span key={index} className="skeleton-block" />)}</div>;
 }
 
-const actionIcon = { UPLOADED: '↑', VIEWED: '◉', TRANSFERRED: '↔', EDITED: '✎', COURT_ACCESSED: '⌂', ALERT_RAISED: '!' };
+const actionIcon = { UPLOADED: '↑', VIEWED: '◉', TRANSFERRED: '↔', EDITED: '✎', COURT_ACCESSED: '⌂', VERIFIED: '✓', ALERT_RAISED: '!' };
 
 export function ActionCard({ entry, isLast = false, expanded: initialExpanded = false }) {
   const [expanded, setExpanded] = useState(initialExpanded);
@@ -203,4 +203,3 @@ export function EmptyState({ icon: Icon = Terminal, title, text }) {
 export function CopyableValue({ children }) {
   return <button className="copyable-value" type="button" onClick={() => navigator.clipboard?.writeText(String(children))}><code>{children}</code><Copy size={12} /></button>;
 }
-
