@@ -40,6 +40,7 @@ function load() {
     const record = JSON.parse(row.record_json);
     record.auditChain = db.prepare('SELECT event_json FROM audit_events WHERE evidence_id = ? ORDER BY ordinal').all(row.id).map((event) => JSON.parse(event.event_json));
     record.securityIncidents ||= [];
+    record.provenance ||= { status: 'SOURCE_UNKNOWN', flags: ['source hash unavailable'], uploader: { name: 'Unknown uploader', badge: 'Not provided', role: 'Not provided' }, attestationStatement: 'Not provided', sourceSystemDeviceId: 'Not provided', sourceType: 'manual upload', officialSourceHash: null, sourceSignatureReference: null, authorisedActionLocation: 'Not voluntarily provided' };
     records.set(record.id, record);
   }
 }
@@ -60,7 +61,7 @@ function publicRecord(record) {
   const integrity = state(record); const firstBroken = integrity.brokenAtIndex;
   const chain = record.auditChain.map((event, index) => ({ index, action: labelKeys.get(event.action) || event.action, officer: event.actor, badge: event.badge, role: event.role, timestamp: event.at, details: event.details, location: event.location, eventHash: event.eventHash, hash: `sha256:${event.eventHash}`, previousHash: event.previousHash ? `sha256:${event.previousHash}` : 'GENESIS', verified: firstBroken === null || index < firstBroken, compromised: firstBroken !== null && index >= firstBroken }));
   const securityIncidents = record.securityIncidents || [];
-  return { id: record.id, docId: record.id, name: record.name, fileName: record.name, size: record.size, mimeType: record.mimeType, caseId: record.caseId, description: record.description, evidenceType: record.evidenceType, classification: record.classification, originalHash: record.originalHash, currentHash: record.currentHash, createdAt: record.createdAt, custodyHolder: record.custodyHolder, tampered: !integrity.valid, tamperBlockIndex: integrity.brokenAtIndex, status: integrity.valid ? 'valid' : 'compromised', valid: integrity.valid, chainLength: chain.length, lastActivity: chain.at(-1)?.timestamp || record.createdAt, chain, timeline: [...chain].reverse(), securityIncidents, auditChainValid: integrity.auditChainValid, auditChainHead: record.auditChain.at(-1)?.eventHash || null, anomalyFlags: { offHoursActivity: chain.some((event) => { const hour = new Date(event.timestamp).getUTCHours(); return hour < 6 || hour >= 20; }), hashMismatch: !integrity.evidenceHashValid, brokenAuditChain: !integrity.auditChainValid, intrusionAttempt: securityIncidents.length > 0 } };
+  return { id: record.id, docId: record.id, name: record.name, fileName: record.name, size: record.size, mimeType: record.mimeType, caseId: record.caseId, description: record.description, evidenceType: record.evidenceType, classification: record.classification, originalHash: record.originalHash, currentHash: record.currentHash, createdAt: record.createdAt, custodyHolder: record.custodyHolder, tampered: !integrity.valid, tamperBlockIndex: integrity.brokenAtIndex, status: integrity.valid ? 'valid' : 'compromised', valid: integrity.valid, chainLength: chain.length, lastActivity: chain.at(-1)?.timestamp || record.createdAt, chain, timeline: [...chain].reverse(), securityIncidents, provenance: record.provenance, auditChainValid: integrity.auditChainValid, auditChainHead: record.auditChain.at(-1)?.eventHash || null, anomalyFlags: { offHoursActivity: chain.some((event) => { const hour = new Date(event.timestamp).getUTCHours(); return hour < 6 || hour >= 20; }), hashMismatch: !integrity.evidenceHashValid, brokenAuditChain: !integrity.auditChainValid, intrusionAttempt: securityIncidents.length > 0 } };
 }
 function getRecord(req, res) { const record = records.get(req.params.id); if (!record) { res.status(404).json({ error: 'Evidence not found.' }); return null; } return record; }
 function recordInvalidTransfer(record, req, attemptedAction) {
@@ -72,11 +73,29 @@ function recordInvalidTransfer(record, req, attemptedAction) {
   save(record);
   return incident;
 }
+function provenanceFor(metadata, evidenceHash) {
+  const sourceType = clean(metadata.sourceType, 'manual upload');
+  const sourceSystemDeviceId = clean(metadata.sourceSystemDeviceId);
+  const officialSourceHash = clean(metadata.officialSourceHash);
+  const sourceSignatureReference = clean(metadata.sourceSignatureReference);
+  const uploaderAttestation = clean(metadata.attestationStatement);
+  const flags = [];
+  if (!sourceSystemDeviceId) flags.push('unregistered source device');
+  if (!officialSourceHash && !sourceSignatureReference) flags.push('source hash unavailable');
+  if (officialSourceHash && officialSourceHash !== evidenceHash) flags.push('source hash mismatch');
+  if (!uploaderAttestation) flags.push('missing uploader attestation');
+  if (!clean(metadata.authorisedActionLocation)) flags.push('upload outside authorised location');
+  const trustedSource = sourceType.toLowerCase() !== 'manual upload' && Boolean(sourceSystemDeviceId) && Boolean(officialSourceHash || sourceSignatureReference);
+  const status = officialSourceHash && officialSourceHash !== evidenceHash ? 'REVIEW_REQUIRED' : trustedSource && flags.length === 0 ? 'SOURCE_VERIFIED' : flags.includes('missing uploader attestation') ? 'REVIEW_REQUIRED' : 'SOURCE_UNKNOWN';
+  return { status, flags, uploader: { name: clean(metadata.officerName, 'Unknown uploader'), badge: clean(metadata.officerBadge, 'Not provided'), role: clean(metadata.officerRole, 'Not provided') }, attestationStatement: uploaderAttestation || 'Not provided', sourceSystemDeviceId: sourceSystemDeviceId || 'Not provided', sourceType, officialSourceHash: officialSourceHash || null, sourceSignatureReference: sourceSignatureReference || null, authorisedActionLocation: clean(metadata.authorisedActionLocation) || 'Not voluntarily provided' };
+}
 function nextId(value) { return clean(value) || `DOC-2026-${String(Math.floor(10000 + Math.random() * 89999))}`; }
 function createRecord({ id, file, metadata = {} }) {
   const digestSource = file?.buffer || Buffer.from(JSON.stringify({ id, caseId: metadata.caseId, description: metadata.description }));
-  const record = { id, name: file?.originalname || clean(metadata.fileName, `${id}_evidence_record`), size: file?.size || digestSource.length, mimeType: file?.mimetype || clean(metadata.mimeType, 'application/octet-stream'), caseId: clean(metadata.caseId, 'CASE/UNASSIGNED'), description: clean(metadata.description, 'Registered evidence record.'), evidenceType: clean(metadata.evidenceType, 'Digital Document'), classification: clean(metadata.classification, 'Sensitive'), originalHash: hash(digestSource), currentHash: hash(digestSource), createdAt: new Date().toISOString(), custodyHolder: clean(metadata.officerName, 'Forensic Officer'), tamperBlockIndex: null, pendingTransfer: null, securityIncidents: [], auditChain: [] };
+  const evidenceHash = hash(digestSource);
+  const record = { id, name: file?.originalname || clean(metadata.fileName, `${id}_evidence_record`), size: file?.size || digestSource.length, mimeType: file?.mimetype || clean(metadata.mimeType, 'application/octet-stream'), caseId: clean(metadata.caseId, 'CASE/UNASSIGNED'), description: clean(metadata.description, 'Registered evidence record.'), evidenceType: clean(metadata.evidenceType, 'Digital Document'), classification: clean(metadata.classification, 'Sensitive'), originalHash: evidenceHash, currentHash: evidenceHash, createdAt: new Date().toISOString(), custodyHolder: clean(metadata.officerName, 'Forensic Officer'), tamperBlockIndex: null, pendingTransfer: null, securityIncidents: [], provenance: provenanceFor(metadata, evidenceHash), auditChain: [] };
   append(record, { action: 'UPLOADED', actor: record.custodyHolder, badge: metadata.officerBadge, role: metadata.officerRole || 'Investigating Officer', details: `${record.description} SHA-256 evidence hash sealed: ${record.originalHash}`, location: metadata.location || 'National Evidence Grid · Intake' });
+  append(record, { action: 'VIEWED', actor: 'SAKSHYA Provenance Engine', badge: 'SYSTEM-PROV', role: 'Source Provenance Assessment', details: `Provenance status: ${record.provenance.status}. Flags: ${record.provenance.flags.join(', ') || 'none'}.`, location: record.provenance.authorisedActionLocation });
   return record;
 }
 function verify(record) { const before = state(record); append(record, { action: 'VERIFIED', actor: 'Verification engine', badge: 'SYSTEM-01', role: 'Integrity Monitor', details: before.valid ? 'SHA-256 hash and audit chain verified.' : 'Integrity verification failed.', location: 'National Evidence Grid' }); save(record); return { ...publicRecord(record), valid: before.valid, brokenAtIndex: before.brokenAtIndex, message: before.valid ? 'Evidence integrity verified.' : 'Evidence integrity compromised.' }; }

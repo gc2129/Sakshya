@@ -33,6 +33,10 @@ curl -F "file=@evidence.pdf" http://localhost:5000/api/evidence/upload
 
 Returns `201` and stores the evidence metadata, SHA-256 hashes, anomaly flags, and audit timeline in SQLite. The uploaded file contents are not persisted.
 
+Optional multipart or JSON provenance fields are `officerName`, `officerBadge`, `officerRole`, `attestationStatement`, `sourceSystemDeviceId`, `sourceType` (`CCTV/DVR`, `forensic lab`, `mobile capture`, `document system`, or `manual upload`), `officialSourceHash`, `sourceSignatureReference`, and `authorisedActionLocation`.
+
+Each response includes `provenance` with a status of `SOURCE_VERIFIED`, `SOURCE_UNKNOWN`, or `REVIEW_REQUIRED` and explainable flags. A source is marked `SOURCE_VERIFIED` only when non-manual source identity and trusted source hash/signature evidence are provided without flags. The service does not claim to detect every edit made before upload.
+
 ## `GET /api/evidence/:id`
 
 Returns the current evidence record and its audit timeline (newest first).
@@ -85,6 +89,10 @@ Each record and report expose these booleans:
 ## Security incidents
 
 Every evidence record and forensic report includes `securityIncidents`. For blocked invalid transfers, each incident records a unique ID, rule, attempted action, summary, timestamp, source network, browser/device context, and an action location only if the client voluntarily sends one. This is authorised investigation context only; it does not identify a person automatically or perform GPS tracking.
+
+## Source provenance
+
+Forensic reports also include the persisted provenance result and its flags. Typical flags include `unregistered source device`, `source hash unavailable`, `source hash mismatch`, `missing uploader attestation`, and `upload outside authorised location`. These flags are source-assessment context, not a claim that the system can identify a person or reconstruct every pre-upload edit.
 
 ## Common errors
 
