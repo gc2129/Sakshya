@@ -85,6 +85,37 @@ Set `SAKSHYA_TRUST_PROXY=true` only when the backend is behind one known, contro
 
 The token is HMAC-signed, stored by hash in SQLite, expires after 24 hours, and is rejected if malformed, tampered, expired, revoked, or absent from persistence. `GET /api/public/verify/:token` is a public read-only endpoint returning only `evidenceId`, `caseReference`, `integrityVerdict`, `auditChainValid`, `reportGenerationTime`, and verification status. It never returns uploaded bytes, IP/device details, custody content, or personal data.
 
+## Forensic Comparison Vault
+
+The vault preserves an immutable original upload separately from a quarantined suspicious version. File bytes are stored only in a server-controlled vault directory; SQLite persists metadata, SHA-256 hashes, timestamps, uploader/actor information, quarantine reason, status and vault audit metadata. The normal evidence record, integrity verification, report download and public QR verifier never read, replace, or expose either vault file.
+
+Only **Senior Authority** and **System Admin** may access these protected endpoints:
+
+- `POST /api/evidence/:id/vault/suspicious` — multipart field `file` plus required `reason`; quarantines a suspicious version without changing the original.
+- `GET /api/evidence/:id/vault` — vault metadata and audit trail only.
+- `GET /api/evidence/:id/vault/compare` — hashes, sizes, timestamps and `MATCH`/`DIFFERENT` verdict only; never file bytes.
+- `GET /api/evidence/:id/vault/original/download` — downloads the immutable original.
+- `GET /api/evidence/:id/vault/suspicious/download` — downloads the quarantined version.
+
+Every vault view, comparison and download writes a cryptographically linked evidence audit event and persistent network trace with actor, role, timestamp, evidence ID, source network and device context. Client-provided paths and filenames are ignored: the server uses generated internal filenames and validates paths remain within `SAKSHYA_VAULT_DIR` (default `data/forensic-comparison-vault`).
+
+```bash
+# Senior Authority or System Admin token
+TOKEN='Bearer <token>'
+
+curl -X POST http://localhost:5000/api/evidence/DOC-2026-001/vault/suspicious \
+  -H "Authorization: $TOKEN" \
+  -F "file=@suspected-modified.pdf" \
+  -F "reason=Submitted copy differs from sealed original"
+
+curl -H "Authorization: $TOKEN" \
+  http://localhost:5000/api/evidence/DOC-2026-001/vault/compare
+
+curl -L -H "Authorization: $TOKEN" \
+  -o original-vault.bin \
+  http://localhost:5000/api/evidence/DOC-2026-001/vault/original/download
+```
+
 ## Final security extensions
 
 ### Registered source devices
