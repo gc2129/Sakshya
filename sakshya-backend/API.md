@@ -126,6 +126,28 @@ curl -L -H "Authorization: $TOKEN" \
 
 `POST /api/offline-sync/evidence` is available to **Investigating Officer** and **Senior Authority**. It accepts `idempotencyKey`, optional `evidenceId`, a 64-character SHA-256 `originalHash`, `clientCapturedAt`, and object `metadata`. It returns `ACCEPTED`, `DUPLICATE`, or `REJECTED`. This is an authenticated/audited metadata queue only; it does **not** claim cryptographic offline signing.
 
+## Compliance, Traceability and Controlled Access
+
+- `GET /api/evidence/:id/traceability/:eventId` — **Senior Authority/System Admin** only; returns one persisted trace event with actor, role, IP, device and voluntary-location context. Viewing is audited. Other roles cannot access it, and public QR remains metadata-only.
+- `GET /api/evidence/:id/bsa-63-certificate.pdf` — **Forensic Analyst/Senior Authority** only. Technical officer-review certificate; it is not a statutory compliance claim or automatic admissibility decision.
+- `GET /api/evidence/:id/access-copy?purpose=...` — authenticated evidence access roles. For PDF/image evidence, returns a derived watermarked PDF rendition; original vault bytes remain unchanged. Other media returns `409` without pretending a watermark.
+- `GET /api/evidence/:id/access-receipt.pdf?purpose=...` — authenticated evidence access roles; records a controlled-access receipt without returning original bytes.
+- `GET /api/offline-sync/status` — current actor queue status.
+- `GET /api/offline-sync/queue` — IO sees only its own items; Senior Authority/System Admin see authorised queue items. The API supports audited hash-and-metadata reconciliation only; encrypted browser storage/service workers must be implemented separately by the frontend.
+
+```bash
+curl -H "Authorization: Bearer <senior-token>" \
+  http://localhost:5000/api/evidence/DOC-2026-001/traceability/<eventId>
+
+curl -L -H "Authorization: Bearer <analyst-token>" \
+  -o bsa-63-certificate.pdf \
+  http://localhost:5000/api/evidence/DOC-2026-001/bsa-63-certificate.pdf
+
+curl -L -H "Authorization: Bearer <token>" \
+  -o access-copy.pdf \
+  "http://localhost:5000/api/evidence/DOC-2026-001/access-copy?purpose=Officer%20review"
+```
+
 ```bash
 curl -L -H "Authorization: Bearer <token>" -o court-bundle.pdf \
   http://localhost:5000/api/evidence/DOC-2026-001/court-bundle
