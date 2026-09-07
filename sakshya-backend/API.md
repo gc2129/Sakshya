@@ -116,6 +116,26 @@ curl -L -H "Authorization: $TOKEN" \
   http://localhost:5000/api/evidence/DOC-2026-001/vault/original/download
 ```
 
+## Demo-critical exports and offline queue
+
+`GET /api/evidence/:id/court-bundle` is available to **Forensic Analyst**, **Senior Authority**, and **Court Viewer**. It downloads a court-ready PDF containing case/evidence IDs, SHA-256 integrity verdict, audit-chain validity, custody-event count, report timestamp, signed QR verification URL/expiry, and a disclaimer that no raw evidence bytes are included. Every export records authenticated audit and network events.
+
+`GET /api/evidence/:id/incident-replay` is limited to **Senior Authority** and **System Admin**. It returns a chronological JSON replay of registration, custody, verification and anomaly activity plus a traceability summary. It never returns raw files, full IP addresses, full User-Agent/device strings, OTP values, QR secrets, or other secrets.
+
+`POST /api/offline-sync/evidence` is available to **Investigating Officer** and **Senior Authority**. It accepts `idempotencyKey`, optional `evidenceId`, a 64-character SHA-256 `originalHash`, `clientCapturedAt`, and object `metadata`. It returns `ACCEPTED`, `DUPLICATE`, or `REJECTED`. This is an authenticated/audited metadata queue only; it does **not** claim cryptographic offline signing.
+
+```bash
+curl -L -H "Authorization: Bearer <token>" -o court-bundle.pdf \
+  http://localhost:5000/api/evidence/DOC-2026-001/court-bundle
+
+curl -H "Authorization: Bearer <senior-or-admin-token>" \
+  http://localhost:5000/api/evidence/DOC-2026-001/incident-replay
+
+curl -X POST http://localhost:5000/api/offline-sync/evidence \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"idempotencyKey":"mobile-queue-0001","evidenceId":"DOC-2026-001","originalHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","clientCapturedAt":"2026-09-07T12:00:00Z","metadata":{"source":"mobile capture"}}'
+```
+
 ## Final security extensions
 
 ### Registered source devices
