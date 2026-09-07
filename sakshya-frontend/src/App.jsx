@@ -57,6 +57,7 @@ import {
 import { api, isApiUnavailable, setAuthInvalidatedHandler } from './lib/api';
 import { clearAuthSession, hasPermission, permissionsFor, readAuthSession, roles, saveAuthSession } from './lib/auth';
 import { AppShell } from './components/Shell';
+import { ForensicComparisonVaultPage } from './components/ForensicComparisonVault';
 import {
   EmptyState,
   HashChainVisualizer,
@@ -269,6 +270,7 @@ const permissionLabels = {
   report: 'generate forensic reports',
   incidents: 'review security incidents',
   admin: 'manage system administration',
+  vault: 'open the forensic comparison vault',
 };
 
 function App() {
@@ -600,6 +602,7 @@ function App() {
         <Route path="/transfer" element={<RoleGate user={session.user} permission="transfer"><TransferPage documents={documents} onRequestTransferOtp={requestTransferOtp} onTransfer={completeTransfer} apiOnline={apiOnline} permissions={permissions} /></RoleGate>} />
         <Route path="/anomalies" element={<RoleGate user={session.user} permission="incidents"><AnomaliesPage documents={documents} /></RoleGate>} />
         <Route path="/reports" element={<RoleGate user={session.user} permission="report"><ReportsPage documents={documents} onReportGenerated={markReportGenerated} apiOnline={apiOnline} apiError={backendError} /></RoleGate>} />
+        <Route path="/vault" element={<RoleGate user={session.user} permission="vault"><ForensicComparisonVaultPage documents={documents} apiOnline={apiOnline} apiError={backendError} /></RoleGate>} />
         <Route path="/admin" element={<RoleGate user={session.user} permission="admin"><AdminPage documents={documents} apiOnline={apiOnline} apiError={backendError} /></RoleGate>} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

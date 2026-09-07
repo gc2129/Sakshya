@@ -38,6 +38,7 @@ const operationsNav = [
   { to: '/upload', label: 'Seal new evidence', icon: FilePlus2, permission: 'upload' },
   { to: '/transfer', label: 'Transfer custody', icon: Send, permission: 'transfer' },
   { to: '/reports', label: 'Forensic reports', icon: BookOpen, permission: 'report' },
+  { to: '/vault', label: 'Comparison vault', icon: FileCheck2, permission: 'vault' },
   { to: '/anomalies', label: 'Anomaly centre', icon: ShieldAlert, permission: 'incidents' },
   { to: '/admin', label: 'Authority console', icon: Users, permission: 'admin' },
 ];
@@ -189,7 +190,7 @@ export function AppShell({ children, theme, onThemeChange, highContrast, onContr
 
 function RouteLabel() {
   const { pathname } = useLocation();
-  const labels = { '/': 'Overview', '/dashboard': 'Command centre', '/upload': 'Seal new evidence', '/transfer': 'Transfer custody', '/verify': 'Chain verifier', '/demo': 'Judge demo mode', '/anomalies': 'Anomaly centre', '/reports': 'Forensic reports', '/admin': 'Authority console' };
+  const labels = { '/': 'Overview', '/dashboard': 'Command centre', '/upload': 'Seal new evidence', '/transfer': 'Transfer custody', '/verify': 'Chain verifier', '/demo': 'Judge demo mode', '/anomalies': 'Anomaly centre', '/reports': 'Forensic reports', '/vault': 'Comparison vault', '/admin': 'Authority console' };
   if (labels[pathname]) return labels[pathname];
   if (pathname.startsWith('/document/')) return 'Document custody record';
   return 'Overview';

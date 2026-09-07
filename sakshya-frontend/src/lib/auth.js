@@ -27,6 +27,7 @@ export const rolePermissions = {
     tamper: true,
     report: true,
     incidents: true,
+    vault: true,
   },
   [roles.courtViewer]: {
     view: true,
@@ -36,6 +37,7 @@ export const rolePermissions = {
   [roles.systemAdmin]: {
     view: true,
     admin: true,
+    vault: true,
   },
 };
 
