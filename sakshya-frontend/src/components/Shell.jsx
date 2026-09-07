@@ -41,7 +41,7 @@ const operationsNav = [
   { to: '/transfer', label: 'Custody Transfer', icon: Send, permission: 'transfer' },
   { to: '/reports', label: 'Forensic Reports & Court Bundle', icon: BookOpen, permission: 'report' },
   { to: '/vault', label: 'Forensic Comparison Vault', icon: FileCheck2, permission: 'vault', allowedRoles: [roles.seniorAuthority, roles.systemAdmin] },
-  { to: '/anomalies', label: 'Anomaly Centre', icon: ShieldAlert, permission: 'incidents' },
+  { to: '/anomalies', label: 'Anomaly Centre', icon: ShieldAlert, permission: 'view' },
   { to: '/admin', label: 'Authority Console', icon: Users, permission: 'admin' },
 ];
 
