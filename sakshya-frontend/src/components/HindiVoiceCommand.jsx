@@ -19,6 +19,15 @@ function speechRecognitionApi() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+const SAFE_HINGLISH_EXAMPLES = [
+  'Case 102 ki evidence verify karo',
+  'Evidence DOC-2026-001 ka report kholo',
+];
+
+function isRomanText(value) {
+  return /^[\x00-\x7F]*$/.test(String(value));
+}
+
 function intentLabel(intent) {
   if (intent === 'VERIFY_EVIDENCE_BY_CASE') return 'Verify evidence by case';
   if (intent === 'OPEN_FORENSIC_REPORT') return 'Open forensic report';
@@ -57,6 +66,11 @@ export function HindiVoiceCommand({ apiOnline, user }) {
   async function parseTranscript(text) {
     const clean = text.trim();
     if (!clean) return;
+    if (!isRomanText(clean)) {
+      setError('Use Roman Hinglish text only. No transliteration was applied.');
+      setStatus('idle');
+      return;
+    }
     setStatus('parsing');
     setError('');
     setParsed(null);
@@ -68,7 +82,7 @@ export function HindiVoiceCommand({ apiOnline, user }) {
     } catch (requestError) {
       const message = requestError.payload?.error || requestError.message || 'The voice command could not be parsed.';
       setError(isApiUnavailable(requestError) ? 'The backend is unavailable. Reconnect before parsing a voice command.' : message);
-      setExamples(requestError.payload?.supportedExamples || []);
+      setExamples((requestError.payload?.supportedExamples || SAFE_HINGLISH_EXAMPLES).filter((example) => SAFE_HINGLISH_EXAMPLES.includes(example)));
       setStatus('idle');
     }
   }
@@ -80,13 +94,13 @@ export function HindiVoiceCommand({ apiOnline, user }) {
     }
     const Recognition = speechRecognitionApi();
     if (!Recognition) {
-      setError('Hindi speech recognition is not available in this browser. Use the typed command field below.');
+      setError('Roman Hinglish speech input is not available in this browser. Use the typed command field below.');
       return;
     }
 
     recognitionRef.current?.abort?.();
     const recognition = new Recognition();
-    recognition.lang = 'hi-IN';
+    recognition.lang = 'en-IN';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onstart = () => {
@@ -97,14 +111,20 @@ export function HindiVoiceCommand({ apiOnline, user }) {
     };
     recognition.onresult = (event) => {
       const text = event.results?.[0]?.[0]?.transcript || '';
+      if (!isRomanText(text)) {
+        setTranscript('');
+        setStatus('idle');
+        setError('Speech recognition returned non-Roman text. Nothing was transliterated; type a supported Roman Hinglish command instead.');
+        return;
+      }
       setTranscript(text);
       parseTranscript(text);
     };
     recognition.onerror = (event) => {
       setStatus('idle');
       setError(event.error === 'not-allowed'
-        ? 'Microphone permission was not granted. You can type a supported Hindi command instead.'
-        : 'The browser could not capture a Hindi voice command. Try again or use the typed field.');
+        ? 'Microphone permission was not granted. You can type a supported Roman Hinglish command instead.'
+        : 'The browser could not capture a Roman Hinglish command. Try again or use the typed field.');
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -146,36 +166,36 @@ export function HindiVoiceCommand({ apiOnline, user }) {
         className={cn('voice-command__trigger', open && 'voice-command__trigger--active', status === 'listening' && 'voice-command__trigger--listening')}
         type="button"
         onClick={() => setOpen((value) => !value)}
-        aria-label="Open Hindi voice assistance"
+        aria-label="Open Hinglish voice assist"
         aria-expanded={open}
-        title="Hindi voice assistance"
+        title="Hinglish voice assist"
       >
         {status === 'listening' ? <MicOff size={17} /> : <Mic size={17} />}
-        <span>Hindi assist</span>
+        <span>Hinglish voice assist</span>
       </button>
       {open && (
-        <div className="voice-command__popover" role="dialog" aria-label="Hindi voice assistance">
+        <div className="voice-command__popover" role="dialog" aria-label="Hinglish voice assist">
           <div className="voice-command__header">
             <div>
               <span className="voice-command__eyebrow">ASSISTED ACTIONS</span>
-              <strong>Hindi voice assistance</strong>
+              <strong>Hinglish voice assist</strong>
             </div>
-            <button className="icon-button" type="button" onClick={() => { setOpen(false); resetCommand(); }} aria-label="Close Hindi voice assistance"><X size={16} /></button>
+            <button className="icon-button" type="button" onClick={() => { setOpen(false); resetCommand(); }} aria-label="Close Hinglish voice assist"><X size={16} /></button>
           </div>
 
-          {!supported && <div className="voice-command__notice voice-command__notice--muted"><Info size={15} /><span>This browser does not expose speech recognition. Type one of the supported commands instead.</span></div>}
+          {!supported && <div className="voice-command__notice voice-command__notice--muted"><Info size={15} /><span>This browser does not expose speech recognition. Type one of the supported Roman Hinglish commands instead.</span></div>}
           {!apiOnline && <div className="voice-command__notice voice-command__notice--alert"><ShieldAlert size={15} /><span>Backend offline. No voice intent can be parsed or executed.</span></div>}
 
           <div className="voice-command__controls">
             <button className="button button--primary" type="button" onClick={startListening} disabled={!supported || !apiOnline || status === 'listening' || status === 'parsing'}>
-              {status === 'listening' ? <><MicOff size={15} />Listening…</> : status === 'parsing' ? <><LoaderCircle size={15} className="spin" />Parsing command…</> : <><Mic size={15} />Speak in Hindi</>}
+              {status === 'listening' ? <><MicOff size={15} />Listening…</> : status === 'parsing' ? <><LoaderCircle size={15} className="spin" />Parsing command…</> : <><Mic size={15} />Speak Roman Hinglish</>}
             </button>
             {(transcript || parsed || error) && <button className="button button--secondary" type="button" onClick={resetCommand}>Clear</button>}
           </div>
 
           <label className="voice-command__input">
-            <span>Recognised or typed command</span>
-            <input value={transcript} onChange={(event) => { setTranscript(event.target.value); setParsed(null); setError(''); }} placeholder="Case 102 ki evidence verify karo" />
+            <span>Recognised or typed Roman Hinglish command</span>
+            <input value={transcript} onChange={(event) => { const next = event.target.value; if (!isRomanText(next)) { setError('Use Roman Hinglish text only. Automatic transliteration is not provided.'); return; } setTranscript(next); setParsed(null); setError(''); }} placeholder="Case 102 ki evidence verify karo" lang="en-IN" inputMode="text" />
           </label>
           {transcript && !parsed && status !== 'parsing' && <button className="text-button voice-command__parse" type="button" onClick={() => parseTranscript(transcript)} disabled={!apiOnline}>Send to backend parser <ArrowRight size={14} /></button>}
 

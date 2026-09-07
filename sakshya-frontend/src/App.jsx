@@ -623,7 +623,7 @@ function App() {
 
   return (
     <Router>
-      <Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px' } }} />
+      <Toaster position="bottom-right" toastOptions={{ duration: 3400, style: { background: theme === 'dark' ? '#13233a' : '#0A2540', color: '#fff', borderRadius: '8px', fontFamily: 'Manrope, sans-serif', fontSize: '13px' } }} />
       <AppErrorBoundary>
         {authStatus === 'checking' ? <AuthLoadingScreen backendStatus={backendStatus} /> : workspace || <LoginPage backendStatus={backendStatus} backendError={backendError} error={authError} busy={authBusy} onLogin={signIn} onRetry={() => { setAuthError(''); setAuthProbe((value) => value + 1); }} />}
       </AppErrorBoundary>
