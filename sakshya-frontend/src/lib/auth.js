@@ -14,6 +14,7 @@ export const rolePermissions = {
     view: true,
     action: true,
     transfer: true,
+    offlineSync: true,
   },
   [roles.forensicAnalyst]: {
     view: true,
@@ -27,6 +28,8 @@ export const rolePermissions = {
     tamper: true,
     report: true,
     incidents: true,
+    incidentReplay: true,
+    offlineSync: true,
     vault: true,
   },
   [roles.courtViewer]: {
@@ -37,6 +40,8 @@ export const rolePermissions = {
   [roles.systemAdmin]: {
     view: true,
     admin: true,
+    incidents: true,
+    incidentReplay: true,
     vault: true,
   },
 };

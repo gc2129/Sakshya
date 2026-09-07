@@ -27,21 +27,22 @@ import {
 } from 'lucide-react';
 import { BrandMark, OfficialSeal, cn, relativeTime } from './ui';
 import { roles } from '../lib/auth';
+import { HindiVoiceCommand } from './HindiVoiceCommand';
 
 const primaryNav = [
-  { to: '/dashboard', label: 'Command centre', icon: LayoutDashboard, end: true },
-  { to: '/dashboard?view=register', label: 'Evidence register', icon: FileCheck2 },
+  { to: '/dashboard', label: 'Command Centre', icon: LayoutDashboard, end: true },
+  { to: '/dashboard?view=register', label: 'Evidence Register', icon: FileCheck2 },
   { to: '/verify', label: 'Chain verifier', icon: ShieldCheck, permission: 'verify' },
-  { to: '/demo', label: 'Judge demo mode', icon: Network, demo: true, permission: 'tamper' },
+  { to: '/demo', label: 'Judge Demo Mode', icon: Network, demo: true, permission: 'tamper' },
 ];
 
 const operationsNav = [
-  { to: '/upload', label: 'Seal new evidence', icon: FilePlus2, permission: 'upload' },
-  { to: '/transfer', label: 'Transfer custody', icon: Send, permission: 'transfer' },
-  { to: '/reports', label: 'Forensic reports', icon: BookOpen, permission: 'report' },
-  { to: '/vault', label: 'Forensic Vault', icon: FileCheck2, permission: 'vault', allowedRoles: [roles.seniorAuthority, roles.systemAdmin] },
-  { to: '/anomalies', label: 'Anomaly centre', icon: ShieldAlert, permission: 'incidents' },
-  { to: '/admin', label: 'Authority console', icon: Users, permission: 'admin' },
+  { to: '/upload', label: 'Register evidence', icon: FilePlus2, permission: 'upload' },
+  { to: '/transfer', label: 'Custody Transfer', icon: Send, permission: 'transfer' },
+  { to: '/reports', label: 'Forensic Reports & Court Bundle', icon: BookOpen, permission: 'report' },
+  { to: '/vault', label: 'Forensic Comparison Vault', icon: FileCheck2, permission: 'vault', allowedRoles: [roles.seniorAuthority, roles.systemAdmin] },
+  { to: '/anomalies', label: 'Anomaly Centre', icon: ShieldAlert, permission: 'incidents' },
+  { to: '/admin', label: 'Authority Console', icon: Users, permission: 'admin' },
 ];
 
 function buildNotifications(documents = []) {
@@ -133,6 +134,7 @@ export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, a
         </div>
       </div>
       <div className="topbar__right">
+        <HindiVoiceCommand apiOnline={apiOnline} user={user} />
         <div className="sync-wrap">
           <button className="sync-pill" type="button" onClick={() => setSyncOpen((value) => !value)} aria-expanded={syncOpen}>
             <span className={cn('sync-dot', apiOnline && 'sync-dot--online')} />
@@ -175,8 +177,8 @@ export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, a
 function Sidebar({ collapsed, mobileOpen, onCollapse, onClose, documents = [], permissions = {}, user }) {
   const openAlerts = documents.filter((document) => document.status === 'compromised' || document.anomalyFlags?.intrusionAttempt || document.anomalyFlags?.brokenAuditChain || document.anomalyFlags?.hashMismatch).length;
   const canShow = (item) => (!item.permission || permissions[item.permission]) && (!item.allowedRoles || item.allowedRoles.includes(user?.role));
-  const nav = operationsNav.filter(canShow).map((item) => item.label === 'Anomaly centre' ? { ...item, count: openAlerts } : item);
-  return <aside className={cn('sidebar', collapsed && 'sidebar--collapsed', mobileOpen && 'sidebar--mobile-open')}><div className="sidebar__header"><div className="sidebar__seal"><OfficialSeal compact /><span>Ministry of Home Affairs<br /><strong>Secure Operations</strong></span></div><button className="sidebar-collapse" type="button" onClick={onCollapse} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" type="button" onClick={onClose} aria-label="Close navigation"><X size={18} /></button></div><nav className="sidebar__nav"><div className="sidebar-section"><span className="sidebar-section__label">Workspace</span>{primaryNav.filter(canShow).map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section"><span className="sidebar-section__label">Operations</span>{nav.map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section sidebar-section--bottom"><span className="sidebar-section__label">System</span><button className="sidebar-link" type="button"><Settings2 size={17} /><span>System settings</span></button><button className="sidebar-link" type="button"><Globe2 size={17} /><span>Language · English</span></button></div></nav><div className="sidebar__footer"><div className="classification-strip"><span className="classification-strip__dot" /><span>RESTRICTED SYSTEM</span></div><div className="sidebar-version">SIH26190 · v0.9.6</div></div></aside>;
+  const nav = operationsNav.filter(canShow).map((item) => item.label === 'Anomaly Centre' ? { ...item, count: openAlerts } : item);
+  return <aside className={cn('sidebar', collapsed && 'sidebar--collapsed', mobileOpen && 'sidebar--mobile-open')}><div className="sidebar__header"><div className="sidebar__seal"><OfficialSeal compact /><span>Ministry of Home Affairs<br /><strong>Secure Operations</strong></span></div><button className="sidebar-collapse" type="button" onClick={onCollapse} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" type="button" onClick={onClose} aria-label="Close navigation"><X size={18} /></button></div><nav className="sidebar__nav" aria-label="Primary navigation"><div className="sidebar-section"><span className="sidebar-section__label">Workspace</span>{primaryNav.filter(canShow).map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section"><span className="sidebar-section__label">Operations</span>{nav.map((item) => <SidebarLink item={item} onNavigate={onClose} key={`${item.label}-${item.to}`} />)}</div><div className="sidebar-section sidebar-section--bottom"><span className="sidebar-section__label">System</span><button className="sidebar-link" type="button"><Settings2 size={17} /><span>System settings</span></button><button className="sidebar-link" type="button"><Globe2 size={17} /><span>Language · English</span></button></div></nav><div className="sidebar__footer"><div className="classification-strip"><span className="classification-strip__dot" /><span>RESTRICTED SYSTEM</span></div><div className="sidebar-version">SIH26190 · v0.9.6</div></div></aside>;
 }
 
 export function AppFooter() {
@@ -186,12 +188,12 @@ export function AppFooter() {
 export function AppShell({ children, theme, onThemeChange, highContrast, onContrastChange, apiOnline, lastSync, apiError, documents = [], user, permissions = {}, onLogout }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  return <div className={cn('app-shell', theme === 'dark' && 'theme-dark', highContrast && 'high-contrast')}><Navbar theme={theme} onThemeChange={onThemeChange} highContrast={highContrast} onContrastChange={onContrastChange} apiOnline={apiOnline} lastSync={lastSync} apiError={apiError} documents={documents} user={user} onLogout={onLogout} onMenu={() => setMobileOpen(true)} /><div className="app-frame"><Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onClose={() => setMobileOpen(false)} documents={documents} permissions={permissions} user={user} />{mobileOpen && <button className="mobile-overlay" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation overlay" />}<main className={cn('main-content', collapsed && 'main-content--wide')}><div className="breadcrumb"><span>SAKSHYA</span><span>/</span><strong><RouteLabel /></strong></div>{children}<AppFooter /></main></div></div>;
+  return <div className={cn('app-shell', theme === 'dark' && 'theme-dark', highContrast && 'high-contrast')}><Navbar theme={theme} onThemeChange={onThemeChange} highContrast={highContrast} onContrastChange={onContrastChange} apiOnline={apiOnline} lastSync={lastSync} apiError={apiError} documents={documents} user={user} onLogout={onLogout} onMenu={() => setMobileOpen(true)} /><div className="app-frame"><Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onClose={() => setMobileOpen(false)} documents={documents} permissions={permissions} user={user} />{mobileOpen && <button className="mobile-overlay" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation overlay" />}<main className={cn('main-content', collapsed && 'main-content--wide')}><div className="workspace-utility-line"><span>MINISTRY OF HOME AFFAIRS · SECURE OPERATIONS</span><span><i className={cn('workspace-utility-line__dot', apiOnline && 'workspace-utility-line__dot--online')} />{apiOnline ? 'Live evidence node' : 'Backend connection required'}</span></div><div className="breadcrumb"><span>SAKSHYA</span><span>/</span><strong><RouteLabel /></strong></div>{children}<AppFooter /></main></div></div>;
 }
 
 function RouteLabel() {
   const { pathname } = useLocation();
-  const labels = { '/': 'Overview', '/dashboard': 'Command centre', '/upload': 'Seal new evidence', '/transfer': 'Transfer custody', '/verify': 'Chain verifier', '/demo': 'Judge demo mode', '/anomalies': 'Anomaly centre', '/reports': 'Forensic reports', '/vault': 'Forensic Vault', '/admin': 'Authority console' };
+  const labels = { '/': 'Overview', '/dashboard': 'Command Centre', '/upload': 'Register evidence', '/transfer': 'Custody Transfer', '/verify': 'Chain verifier', '/demo': 'Judge Demo Mode', '/anomalies': 'Anomaly Centre', '/reports': 'Forensic Reports & Court Bundle', '/vault': 'Forensic Comparison Vault', '/admin': 'Authority Console' };
   if (labels[pathname]) return labels[pathname];
   if (pathname.startsWith('/document/')) return 'Document custody record';
   return 'Overview';
