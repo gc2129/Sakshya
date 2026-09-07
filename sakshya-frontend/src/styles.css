@@ -1287,3 +1287,147 @@ code, .mono { font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, mono
   .search-results { left: -42px; }
   .copyable-value code { max-width: 180px; }
 }
+
+/* Forensic comparison vault */
+.vault-page { max-width: 1220px; }
+.vault-notice { display: flex; align-items: flex-start; gap: 10px; margin: -10px 0 13px; padding: 11px 13px; border: 1px solid #edc7c6; border-left: 3px solid var(--red); border-radius: 7px; color: var(--red); background: var(--panel); }
+.vault-notice--offline { border-color: #f0d694; border-left-color: var(--amber); color: var(--amber); background: #fffaf0; }
+.vault-notice--denied { border-color: #e5bfc0; border-left-color: var(--red); }
+.vault-notice__icon { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 5px; background: #fff0ef; }
+.vault-notice--offline .vault-notice__icon { background: #fff3d6; }
+.vault-notice > div { min-width: 0; display: grid; gap: 3px; flex: 1; }
+.vault-notice strong { font-size: 11px; }
+.vault-notice span { color: var(--text-soft); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.vault-notice code { padding-top: 3px; color: var(--red); font: 9px 'IBM Plex Mono'; white-space: nowrap; }
+.vault-notice--offline code { color: var(--amber); }
+.vault-selector { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(280px, .92fr); gap: 24px; align-items: center; margin-bottom: 12px; padding: 18px 19px; }
+.vault-selector h2, .vault-record h2 { margin: 6px 0 0; color: var(--navy); font-size: 17px; letter-spacing: -.025em; }
+.theme-dark .vault-selector h2, .theme-dark .vault-record h2 { color: var(--text); }
+.vault-selector p { max-width: 620px; margin: 8px 0 0; color: var(--text-soft); font-size: 11px; line-height: 1.5; }
+.vault-selector__controls { display: grid; gap: 9px; }
+.vault-selector__controls .form-field { margin: 0; }
+.vault-selector__controls select { height: 38px; }
+.vault-policy { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font: 9px 'IBM Plex Mono'; line-height: 1.4; }
+.vault-policy svg { color: var(--amber); flex: 0 0 auto; }
+.vault-loading { min-height: 300px; padding: 19px; }
+.vault-empty-page { min-height: 280px; display: grid; place-items: center; padding: 22px; }
+.vault-record { margin-bottom: 12px; padding: 18px 19px; }
+.vault-record__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.vault-record__identity { min-width: 0; display: flex; align-items: flex-start; gap: 11px; }
+.vault-record__identity > div { min-width: 0; }
+.vault-record__identity h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-record__id { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--text-muted); font: 9px 'IBM Plex Mono'; text-transform: uppercase; }
+.vault-record__facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 18px; padding-top: 13px; border-top: 1px solid var(--border-subtle); }
+.vault-record__facts span { min-width: 0; display: grid; gap: 4px; }
+.vault-record__facts small { color: var(--text-muted); font: 9px 'IBM Plex Mono'; text-transform: uppercase; }
+.vault-record__facts strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-comparison { margin-bottom: 12px; padding: 18px 19px; }
+.vault-metadata-only { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font: 9px 'IBM Plex Mono'; white-space: nowrap; }
+.vault-version-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.vault-version-card { min-width: 0; display: flex; flex-direction: column; padding: 14px; border: 1px solid var(--border); border-top: 2px solid var(--text-muted); border-radius: 7px; background: var(--panel-soft); }
+.vault-version-card--original { border-top-color: var(--teal); }
+.vault-version-card--suspicious { border-top-color: var(--amber); }
+.vault-version-card--empty { border-top-color: var(--border); }
+.vault-version-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.vault-version-card__head > div { min-width: 0; }
+.vault-version-card__index { color: var(--text-muted); font: 9px 'IBM Plex Mono'; letter-spacing: .06em; }
+.vault-version-card h3 { overflow: hidden; margin: 5px 0 0; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-version-card__hash { display: grid; gap: 6px; margin-top: 16px; }
+.vault-version-card__hash > span, .vault-version-card__facts small { color: var(--text-muted); font: 9px 'IBM Plex Mono'; text-transform: uppercase; }
+.vault-version-card__hash .hash-chip { max-width: 100%; width: max-content; }
+.vault-version-card__hash .hash-chip code { max-width: 230px; }
+.vault-version-card__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.vault-version-card__facts span { min-width: 0; display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.vault-version-card__facts strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-version-card__reason { display: grid; gap: 3px; min-height: 42px; margin: 0 0 13px; padding: 8px 9px; border-left: 2px solid var(--amber); color: var(--text-soft); background: var(--panel); font-size: 10px; line-height: 1.4; }
+.vault-version-card__reason strong { color: var(--amber); font: 9px 'IBM Plex Mono'; text-transform: uppercase; }
+.vault-version-card > .button { margin-top: auto; }
+.vault-version-card__empty { min-height: 157px; display: grid; place-items: center; align-content: center; gap: 6px; color: var(--text-muted); text-align: center; }
+.vault-version-card__empty svg { color: var(--border); }
+.vault-version-card__empty strong { color: var(--text-soft); font-size: 11px; }
+.vault-version-card__empty span { max-width: 240px; font-size: 10px; line-height: 1.45; }
+.vault-verdict { display: flex; align-items: flex-start; gap: 11px; margin-top: 12px; padding: 13px; border: 1px solid #c5ead4; border-left: 3px solid var(--green); border-radius: 7px; background: #f8fdf9; }
+.vault-verdict--different { border-color: #e5bfc0; border-left-color: var(--red); background: #fff8f7; }
+.vault-verdict__icon { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 6px; color: var(--green); background: #e3f4eb; }
+.vault-verdict--different .vault-verdict__icon { color: var(--red); background: #fee9e7; }
+.vault-verdict > div { min-width: 0; flex: 1; }
+.vault-verdict h3 { margin: 5px 0 4px; color: var(--green); font-size: 14px; letter-spacing: .02em; }
+.vault-verdict--different h3 { color: var(--red); }
+.vault-verdict p { margin: 0; color: var(--text-soft); font-size: 10px; line-height: 1.5; }
+.vault-verdict > code { color: var(--text-muted); font: 9px 'IBM Plex Mono'; }
+.vault-awaiting { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 12px 13px; border: 1px dashed var(--border); border-radius: 6px; color: var(--text-muted); background: var(--panel-soft); }
+.vault-awaiting svg { flex: 0 0 auto; margin-top: 1px; color: var(--amber); }
+.vault-awaiting div { display: grid; gap: 3px; }
+.vault-awaiting strong { color: var(--text-soft); font-size: 11px; }
+.vault-awaiting span { font-size: 10px; line-height: 1.45; }
+.vault-lower-grid { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 12px; }
+.vault-upload-panel, .vault-audit-panel { min-width: 0; padding: 18px 19px; }
+.vault-protected-label { display: inline-flex; align-items: center; gap: 5px; color: var(--teal); font: 9px 'IBM Plex Mono'; white-space: nowrap; }
+.vault-panel-intro { margin: 11px 0 14px; color: var(--text-soft); font-size: 10px; line-height: 1.5; }
+.vault-dropzone { min-height: 150px; position: relative; display: grid; justify-items: center; align-content: center; gap: 5px; padding: 18px; border: 1px dashed #aebfce; border-radius: 7px; color: var(--text-muted); background: var(--panel-soft); text-align: center; transition: border-color .2s, background .2s, transform .2s; }
+.vault-dropzone input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.vault-dropzone:hover, .vault-dropzone--dragging { border-color: var(--police); background: #f2f6ff; transform: translateY(-1px); }
+.vault-dropzone--disabled { border-color: var(--border); background: var(--canvas); cursor: not-allowed; transform: none; }
+.vault-dropzone--disabled input { cursor: not-allowed; }
+.vault-dropzone__icon { width: 35px; height: 35px; display: grid; place-items: center; margin-bottom: 3px; border-radius: 7px; color: var(--police); background: #eaf0ff; }
+.vault-dropzone strong { max-width: 100%; overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-dropzone span { font-size: 10px; }
+.vault-dropzone small { color: var(--text-muted); font: 9px 'IBM Plex Mono'; }
+.vault-selected-file { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 9px; border: 1px solid #c7d9f4; border-radius: 6px; color: var(--police); background: #f5f8ff; }
+.vault-selected-file > span { min-width: 0; display: grid; gap: 2px; flex: 1; }
+.vault-selected-file strong { overflow: hidden; color: var(--text-soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-selected-file small { color: var(--text-muted); font-size: 9px; }
+.vault-selected-file .icon-button { margin-left: auto; }
+.vault-reason-field { margin-top: 13px; }
+.vault-reason-field textarea { min-height: 78px; }
+.vault-field-hint { display: flex; gap: 6px; align-items: flex-start; margin: 10px 0; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+.vault-field-hint svg { flex: 0 0 auto; margin-top: 1px; color: var(--amber); }
+.vault-upload-panel .vault-notice { margin: 10px 0; }
+.vault-audit-list { display: grid; gap: 0; margin: 16px 0 0; padding: 0; list-style: none; }
+.vault-audit-item { min-width: 0; position: relative; display: flex; gap: 10px; padding: 0 0 17px; }
+.vault-audit-item:last-child { padding-bottom: 0; }
+.vault-audit-item__marker { width: 22px; position: relative; display: grid; place-items: start center; flex: 0 0 auto; color: var(--green); }
+.vault-audit-item:not(:last-child) .vault-audit-item__marker::after { content: ''; width: 1px; position: absolute; top: 15px; bottom: 0; background: var(--border); }
+.vault-audit-item__marker > svg, .vault-audit-item__marker > span { z-index: 1; width: 15px; height: 15px; display: grid; place-items: center; border: 1px solid #b9dfc8; border-radius: 50%; background: var(--panel); }
+.vault-audit-item__marker > span { width: 7px; height: 7px; margin-top: 4px; border-color: var(--border); }
+.vault-audit-item__body { min-width: 0; display: grid; gap: 4px; flex: 1; padding-bottom: 1px; }
+.vault-audit-item__body > div { display: flex; justify-content: space-between; gap: 10px; }
+.vault-audit-item__body strong { color: var(--text); font-size: 11px; text-transform: capitalize; }
+.vault-audit-item__body time { color: var(--text-muted); font: 9px 'IBM Plex Mono'; white-space: nowrap; }
+.vault-audit-item__body > span { color: var(--text-muted); font: 9px 'IBM Plex Mono'; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-audit-item__body p { margin: 2px 0 0; color: var(--text-soft); font-size: 10px; line-height: 1.4; }
+.vault-audit-item__body .hash-chip { width: max-content; margin-top: 2px; }
+.vault-audit-item__link { width: max-content; color: var(--police); font-size: 9px; }
+.vault-safety-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 13px; padding: 10px 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+.vault-safety-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--teal); }
+.theme-dark .vault-notice--offline { background: #382d1d; border-color: #6b5524; }
+.theme-dark .vault-notice--denied { background: #2b1c23; border-color: #694044; }
+.theme-dark .vault-notice__icon { background: #3a202a; }
+.theme-dark .vault-notice--offline .vault-notice__icon { background: #4a3820; }
+.theme-dark .vault-version-card { background: var(--panel-soft); }
+.theme-dark .vault-version-card__reason { background: var(--panel); }
+.theme-dark .vault-verdict { background: #14372e; border-color: #245c4a; }
+.theme-dark .vault-verdict--different { background: #3a202a; border-color: #683b42; }
+.theme-dark .vault-awaiting { background: var(--panel-soft); }
+.theme-dark .vault-dropzone:hover, .theme-dark .vault-dropzone--dragging { background: #172f4c; }
+.theme-dark .vault-selected-file { background: #152c46; border-color: #345578; }
+
+@media (max-width: 900px) {
+  .vault-selector, .vault-lower-grid { grid-template-columns: 1fr; }
+  .vault-record__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .vault-selector, .vault-record, .vault-comparison, .vault-upload-panel, .vault-audit-panel { padding: 15px; }
+  .vault-selector { gap: 15px; }
+  .vault-record__top { display: block; }
+  .vault-record__top > .status-badge { margin-top: 12px; }
+  .vault-version-grid { grid-template-columns: 1fr; }
+  .vault-record__facts { grid-template-columns: 1fr 1fr; gap: 11px 8px; }
+  .vault-metadata-only { white-space: normal; text-align: right; }
+  .vault-verdict { display: grid; grid-template-columns: 31px minmax(0, 1fr); }
+  .vault-verdict > code { grid-column: 2; }
+  .vault-notice > code { display: none; }
+  .vault-audit-item__body > div { display: grid; gap: 3px; }
+  .vault-audit-item__body time { white-space: normal; }
+}

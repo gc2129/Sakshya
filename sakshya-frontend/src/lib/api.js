@@ -136,6 +136,23 @@ export const api = {
 
   getDocumentChain: (docId) => request(`/documents/${encodedId(docId)}/chain`),
   getEvidence: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}`),
+  getEvidenceVault: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/vault`),
+  compareEvidenceVault: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/vault/compare`),
+  uploadSuspiciousVaultFile: (evidenceId, { file, reason }) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('reason', reason);
+    return request(`/evidence/${encodedId(evidenceId)}/vault/suspicious`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+  downloadVaultFile: (evidenceId, kind) => {
+    if (!['original', 'suspicious'].includes(kind)) {
+      throw new Error('The requested vault file type is not recognised.');
+    }
+    return requestBlob(`/evidence/${encodedId(evidenceId)}/vault/${kind}/download`);
+  },
 
   verifyChain: (docId) => request(`/documents/${encodedId(docId)}/verify`, {
     method: 'POST',
