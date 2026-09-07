@@ -63,6 +63,28 @@ Source provenance is an honest assessment, not a claim to detect every pre-uploa
 
 `400` invalid request, `401` missing/invalid session or OTP, `403` role or transfer denial, `404` missing evidence, `409` duplicate data, and `413` files over 25 MB.
 
+## Incident traceability and court QR verification
+
+Every invalid OTP, denied protected action, verification failure and other recorded sensitive action writes a SQLite `network_events` row. Evidence incidents now expose stable `sourceNetwork`, `deviceContext`, and `locationContext` fields. The full IP and User-Agent are available only to System Admin and Senior Authority; all other roles receive redacted values. `127.0.0.1` and `::1` are valid local-test values. Browser location is included only when the client sends `locationConsent: true`; otherwise `locationContext` is always `Not voluntarily shared`.
+
+Set `SAKSHYA_TRUST_PROXY=true` only when the backend is behind one known, controlled reverse proxy. By default Express ignores forwarded client IP headers, preventing spoofed `X-Forwarded-For` values. Network information is **“Approximate network-origin context for lawful authorised investigation”**; it does not infer a person's identity, GPS location, city, or an attacker name.
+
+`GET /api/evidence/:id/report` and `GET /api/documents/:id/report` now include:
+
+```json
+{
+  "qrVerification": {
+    "token": "signed-payload.signature",
+    "verificationUrl": "/api/public/verify/signed-payload.signature",
+    "expiresAt": "2026-01-01T00:00:00.000Z",
+    "signed": true,
+    "publicSafe": true
+  }
+}
+```
+
+The token is HMAC-signed, stored by hash in SQLite, expires after 24 hours, and is rejected if malformed, tampered, expired, revoked, or absent from persistence. `GET /api/public/verify/:token` is a public read-only endpoint returning only `evidenceId`, `caseReference`, `integrityVerdict`, `auditChainValid`, `reportGenerationTime`, and verification status. It never returns uploaded bytes, IP/device details, custody content, or personal data.
+
 ## Final security extensions
 
 ### Registered source devices
