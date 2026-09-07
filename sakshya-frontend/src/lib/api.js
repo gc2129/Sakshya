@@ -78,7 +78,7 @@ async function requestBlob(path, options = {}) {
     throw error;
   }
 
-  const { skipAuth = false, ...fetchOptions } = options;
+  const { skipAuth = false, fallbackFilename = 'sakshya-forensic-report.pdf', ...fetchOptions } = options;
   const response = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
     headers: requestHeaders({ skipAuth, headers: fetchOptions.headers }),
@@ -95,7 +95,7 @@ async function requestBlob(path, options = {}) {
 
   return {
     blob: await response.blob(),
-    filename: response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/i)?.[1] || 'sakshya-forensic-report.pdf',
+    filename: response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/i)?.[1] || fallbackFilename,
   };
 }
 
@@ -206,6 +206,34 @@ export const api = {
   getDocumentReport: (docId) => request(`/documents/${encodedId(docId)}/report`),
   getEvidenceReport: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/report`),
   downloadEvidenceReportPdf: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/report.pdf`),
+  downloadCourtBundle: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/court-bundle`, {
+    fallbackFilename: `${evidenceId}-court-bundle.pdf`,
+  }),
+  getIncidentReplay: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/incident-replay`),
+  syncEvidenceActions: (evidenceId, actions) => request(`/evidence/${encodedId(evidenceId)}/sync-actions`, {
+    method: 'POST',
+    body: JSON.stringify({ actions }),
+  }),
+  queueOfflineEvidence: (payload) => request('/offline-sync/evidence', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  parseVoiceCommand: (text) => request('/voice/parse', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  }),
+  publicVerificationUrl: (verificationPath) => {
+    if (!verificationPath || !API_BASE) return '';
+    try {
+      const base = new URL(API_BASE);
+      const candidate = new URL(verificationPath, `${API_BASE}/`);
+      const allowedPath = `${base.pathname.replace(/\/+$/, '')}/public/verify/`;
+      if (candidate.origin !== base.origin || !candidate.pathname.startsWith(allowedPath)) return '';
+      return candidate.toString();
+    } catch {
+      return '';
+    }
+  },
 };
 
 export function isApiUnavailable(error) {
