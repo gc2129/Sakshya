@@ -1431,3 +1431,382 @@ code, .mono { font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, mono
   .vault-audit-item__body > div { display: grid; gap: 3px; }
   .vault-audit-item__body time { white-space: normal; }
 }
+
+/* Stitch global polish: a calm government-console surface across live screens. */
+:root {
+  --sidebar-ink: #0a2540;
+  --sidebar-surface: #123b5c;
+  --sidebar-line: #1e4b6c;
+  --sidebar-text: #b9ccdc;
+  --sidebar-muted: #7f9caf;
+}
+
+.sidebar {
+  background: var(--sidebar-ink);
+  border-right-color: var(--sidebar-line);
+}
+.sidebar__header {
+  border-bottom-color: var(--sidebar-line);
+}
+.sidebar__seal {
+  color: var(--sidebar-muted);
+}
+.sidebar__seal strong {
+  color: #f4f8fb;
+}
+.sidebar .official-seal {
+  color: #75aaff;
+  border-color: rgba(117, 170, 255, .52);
+}
+.sidebar .official-seal__core {
+  border-color: #75aaff;
+}
+.sidebar-collapse,
+.sidebar-close {
+  color: var(--sidebar-text);
+}
+.sidebar-collapse:hover,
+.sidebar-close:hover {
+  color: #fff;
+  background: var(--sidebar-surface);
+  border-color: #356487;
+}
+.sidebar-section__label {
+  color: var(--sidebar-muted);
+}
+.sidebar-section--bottom {
+  border-top-color: var(--sidebar-line);
+}
+.sidebar-link {
+  color: var(--sidebar-text);
+  border-radius: 5px;
+  transition: color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.sidebar-link:hover {
+  color: #fff;
+  background: var(--sidebar-surface);
+  transform: translateX(1px);
+}
+.sidebar-link--active,
+.theme-dark .sidebar-link--active {
+  color: #fff !important;
+  background: #174a73 !important;
+  box-shadow: inset 3px 0 0 #6ea6ff;
+}
+.sidebar-link--active svg {
+  color: #8fbaff;
+}
+.sidebar .nav-pill {
+  color: #17324a;
+  background: #f5d474;
+}
+.sidebar .nav-count {
+  color: #ffd9a0;
+  background: rgba(197, 61, 69, .36);
+}
+.sidebar__footer {
+  border-top: 1px solid rgba(131, 169, 198, .16);
+}
+.sidebar .classification-strip,
+.sidebar-version {
+  color: var(--sidebar-muted);
+}
+
+.main-content {
+  padding-inline: clamp(18px, 3.1vw, 42px);
+}
+.main-content--wide {
+  padding-inline: clamp(22px, 3.7vw, 52px);
+}
+.breadcrumb {
+  height: 49px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.page-header {
+  padding: 21px 0 19px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.page-header h1 {
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -.045em;
+}
+.theme-dark .page-header h1 {
+  color: var(--text);
+}
+.dashboard-page,
+.detail-page,
+.anomalies-page,
+.reports-page,
+.vault-page,
+.admin-page {
+  width: 100%;
+  max-width: 1320px;
+  margin-inline: auto;
+}
+.panel,
+.stats-card,
+.document-card,
+.detail-summary,
+.evidence-integrity,
+.source-provenance,
+.chain-visualizer,
+.timeline-panel,
+.report-proof-card,
+.vault-selector,
+.vault-record,
+.vault-comparison,
+.vault-upload-panel,
+.vault-audit-panel {
+  border-radius: 6px;
+}
+.panel,
+.stats-card,
+.document-card {
+  box-shadow: 0 4px 16px rgba(13, 37, 64, .045);
+}
+.theme-dark .panel,
+.theme-dark .stats-card,
+.theme-dark .document-card {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12);
+}
+
+/* A navigation strip, not a progress claim: every step resolves to an existing route or a role gate. */
+.demo-flow-strip {
+  display: grid;
+  grid-template-columns: minmax(180px, .72fr) minmax(0, 2.28fr);
+  gap: 20px;
+  align-items: center;
+  margin: -4px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--police);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+.demo-flow-strip__intro {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.demo-flow-strip__intro strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.demo-flow-strip__intro small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.demo-flow-strip__steps {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.demo-flow-step {
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 18px 2px 0;
+}
+.demo-flow-step::after {
+  content: '';
+  width: 12px;
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  border-top: 1px solid var(--border);
+}
+.demo-flow-step:last-child::after {
+  display: none;
+}
+.demo-flow-step__number {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid #c8d6e5;
+  border-radius: 50%;
+  color: var(--police);
+  background: #f3f7ff;
+  font: 9px 'IBM Plex Mono';
+}
+.demo-flow-step > a,
+.demo-flow-step__copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.demo-flow-step > a {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 600;
+  transition: color .18s ease;
+}
+.demo-flow-step > a:hover {
+  color: var(--police);
+}
+.demo-flow-step > a svg {
+  display: none;
+}
+.demo-flow-step__copy strong {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.demo-flow-step__copy small {
+  color: var(--text-muted);
+  font: 8px 'IBM Plex Mono';
+}
+.demo-flow-step--restricted {
+  opacity: .62;
+}
+.theme-dark .demo-flow-step__number {
+  border-color: #3a5d7a;
+  background: #142f49;
+}
+
+.command-stats .stats-card {
+  min-height: 132px;
+  border-top-width: 3px;
+}
+.command-stats .stats-card--navy { border-top-color: var(--navy); }
+.command-stats .stats-card--teal { border-top-color: var(--teal); }
+.command-stats .stats-card--blue { border-top-color: var(--police); }
+.command-stats .stats-card--amber { border-top-color: var(--amber); }
+.command-stats .stats-card--slate { border-top-color: var(--border); }
+.stats-card--interactive:hover {
+  border-color: #b8c9da;
+  box-shadow: 0 7px 18px rgba(13, 37, 64, .09);
+  transform: translateY(-1px);
+}
+.document-card {
+  padding: 18px;
+}
+.document-card--compromised {
+  border-color: #dfb1b4;
+  background: var(--panel);
+}
+.document-card__bottom {
+  min-height: 28px;
+}
+.detail-summary {
+  padding: 20px;
+  border-left: 3px solid var(--police);
+}
+.evidence-integrity {
+  border-left-width: 4px;
+}
+.timeline-entry {
+  transition: transform .18s ease;
+}
+.timeline-entry:hover {
+  transform: translateX(1px);
+}
+.timeline-entry__body {
+  border-radius: 6px;
+}
+
+.anomalies-page .page-header,
+.reports-page .page-header,
+.vault-page .page-header {
+  margin-bottom: 14px;
+}
+.anomaly-card {
+  border-radius: 5px;
+}
+.report-selector {
+  border-left: 3px solid var(--police);
+}
+.report-proof-summary {
+  gap: 10px;
+}
+.report-proof-card {
+  min-height: 100px;
+  padding: 13px;
+}
+.report-table__row {
+  min-height: 38px;
+}
+.report-table__row:not(.report-table__head):nth-child(even) {
+  background: #fbfcfd;
+}
+.report-table__head {
+  letter-spacing: .08em;
+}
+.theme-dark .report-table__row:not(.report-table__head):nth-child(even) {
+  background: #142b42;
+}
+.vault-selector {
+  border-left: 3px solid var(--police);
+}
+.vault-record {
+  border-left: 3px solid var(--teal);
+}
+.vault-comparison {
+  border-top: 2px solid var(--navy);
+}
+.theme-dark .vault-comparison {
+  border-top-color: #5f88b0;
+}
+.vault-version-card {
+  border-radius: 6px;
+}
+.vault-safety-note {
+  font-size: 10px;
+}
+
+@media (max-width: 980px) {
+  .demo-flow-strip {
+    grid-template-columns: 1fr;
+    gap: 11px;
+  }
+  .demo-flow-strip__steps {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .main-content,
+  .main-content--wide {
+    padding-inline: 15px;
+  }
+  .page-header {
+    padding-top: 17px;
+  }
+  .demo-flow-strip {
+    margin-top: 0;
+    padding: 13px;
+  }
+  .demo-flow-strip__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 0;
+  }
+  .demo-flow-step::after {
+    display: none;
+  }
+  .demo-flow-step {
+    padding-right: 8px;
+  }
+  .demo-flow-step__copy strong {
+    white-space: normal;
+  }
+  .detail-summary {
+    padding: 16px;
+  }
+  .report-proof-summary {
+    gap: 8px;
+  }
+}
