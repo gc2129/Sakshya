@@ -203,6 +203,11 @@ function anomalyEventsFromDocuments(documents) {
       const score = rawScore !== undefined && rawScore !== null && Number.isFinite(Number(rawScore))
         ? Number(rawScore)
         : null;
+      const trace = incident.networkOriginContext || {};
+      const sourceNetwork = incident.sourceNetwork || trace.sourceNetwork || 'Not supplied';
+      const deviceContext = incident.deviceContext || trace.deviceContext || incident.deviceMetadata || 'Not supplied';
+      const locationContext = incident.locationContext || trace.locationContext || incident.authorisedActionLocation || 'Not voluntarily shared';
+      const networkOrigin = trace.networkOrigin || 'Not supplied';
       const rawStatus = String(incident.status || 'OPEN').toUpperCase();
       events.push({
         docId: document.docId,
@@ -217,9 +222,10 @@ function anomalyEventsFromDocuments(documents) {
         summary: incident.summary || 'A security rule blocked or flagged an action on this evidence record.',
         details: [
           `Attempted action: ${incident.attemptedAction || 'Not supplied'}`,
-          `Source network: ${incident.sourceNetwork || 'Not supplied'}`,
-          `Device context: ${incident.deviceMetadata || 'Not supplied'}`,
-          ...(incident.authorisedActionLocation ? [`Voluntarily shared location: ${incident.authorisedActionLocation}`] : []),
+          `Source network: ${sourceNetwork}`,
+          `Network origin: ${networkOrigin}`,
+          `Device context: ${deviceContext}`,
+          `Voluntarily shared location: ${locationContext}`,
         ],
         incident,
       });
@@ -735,6 +741,7 @@ function DashboardPage({ documents, onRefresh, lastSync, loading, apiOnline, api
 
   return (
     <div className="dashboard-page">
+      <DemoFlowStrip permissions={permissions} apiOnline={apiOnline} />
       <PageHeader eyebrow="OPERATIONS OVERVIEW" icon={LayoutIcon} title="Command centre" description="Live custody posture across the secure evidence register." actions={<><button className="button button--secondary" type="button" onClick={() => { onRefresh(); toast.success('Evidence register refresh requested.'); }}><RefreshCw size={15} />Refresh register</button>{permissions.upload && <Link className="button button--primary" to="/upload"><FilePlus2 size={15} />Seal evidence</Link>}</>} />
       {!loading && !apiOnline && <OfflineBanner message={apiError} />}
       <section className="stats-grid command-stats">
@@ -763,6 +770,19 @@ function DashboardPage({ documents, onRefresh, lastSync, loading, apiOnline, api
     </div>
   );
 }
+
+function DemoFlowStrip({ permissions = {}, apiOnline }) {
+  const steps = [
+    { label: 'Seal evidence', permission: 'upload', to: '/upload' },
+    { label: 'Verify chain', permission: 'verify', to: '/verify' },
+    { label: 'Transfer custody', permission: 'transfer', to: '/transfer' },
+    { label: 'Tamper demo', permission: 'tamper', to: '/demo' },
+    { label: 'Forensic report', permission: 'report', to: '/reports' },
+  ];
+
+  return <section className="demo-flow-strip" aria-label="Judge demo flow"><div className="demo-flow-strip__intro"><SectionEyebrow icon={Network}>JUDGE DEMO FLOW</SectionEyebrow><strong>{apiOnline ? 'Live backend workflow' : 'Backend reconnect required'}</strong><small>Use only authorised actions on a live record.</small></div><ol className="demo-flow-strip__steps">{steps.map((step, index) => { const allowed = Boolean(permissions[step.permission]); return <li className={cn('demo-flow-step', !allowed && 'demo-flow-step--restricted')} key={step.permission}><span className="demo-flow-step__number">{String(index + 1).padStart(2, '0')}</span>{allowed ? <Link to={step.to}><span>{step.label}</span><ArrowRight size={12} /></Link> : <div className="demo-flow-step__copy"><strong>{step.label}</strong><small>Role restricted</small></div>}</li>; })}</ol></section>;
+}
+
 function DocumentCard({ document, index = 0 }) {
   return <motion.article className={cn('document-card', document.status === 'compromised' && 'document-card--compromised')} {...motionProps(0.04 + index * 0.04)}><div className="document-card__top"><div className="document-card__file-icon"><FileText size={19} /></div><StatusBadge status={document.status} /></div><div className="document-card__identity"><Link to={`/document/${document.docId}`}><h3>{document.docId}</h3></Link><p>{document.name}</p></div><div className="document-card__meta"><span><small>CASE REFERENCE</small><code>{document.caseId}</code></span><span><small>CLASSIFICATION</small><strong>{document.classification}</strong></span></div><div className="document-card__bottom"><span><Link2 size={13} /> {document.chain.length} blocks linked</span><span>{relativeTime(document.lastActivity)}</span><Link to={`/document/${document.docId}`} className="round-arrow" aria-label={`Open ${document.docId}`}><ArrowUpRight size={15} /></Link></div></motion.article>;
 }
@@ -1117,15 +1137,17 @@ function ExplainerStep({ number, title, text }) {
 
 function IncidentMetadata({ event }) {
   const incident = event.incident;
+  const trace = incident?.networkOriginContext || {};
   const metadata = [
     ['Rule', incident?.rule || event.type],
     ['Attempted action', incident?.attemptedAction || 'Rule-based signal'],
     ['Timestamp', formatTime(incident?.timestamp || event.timestamp)],
-    ['Source network', incident?.sourceNetwork || 'Not returned by backend'],
-    ['Device context', incident?.deviceMetadata || 'Not returned by backend'],
-    ['Voluntarily shared location', incident?.authorisedActionLocation || 'Not returned'],
+    ['Source network', incident?.sourceNetwork || trace.sourceNetwork || 'Not supplied'],
+    ['Network origin', trace.networkOrigin || 'Not supplied'],
+    ['Device context', incident?.deviceContext || trace.deviceContext || incident?.deviceMetadata || 'Not supplied'],
+    ['Voluntarily shared location', incident?.locationContext || trace.locationContext || incident?.authorisedActionLocation || 'Not voluntarily shared'],
   ];
-  return <div className="incident-meta-grid">{metadata.map(([label, value]) => <div className="incident-meta-item" key={label}><span>{label}</span><strong className={label === 'Timestamp' || label === 'Source network' ? 'mono' : ''}>{value}</strong></div>)}</div>;
+  return <div className="incident-meta-grid">{metadata.map(([label, value]) => <div className="incident-meta-item" key={label}><span>{label}</span><strong className={label === 'Timestamp' || label === 'Source network' || label === 'Network origin' ? 'mono' : ''}>{value}</strong></div>)}</div>;
 }
 
 function AnomaliesPage({ documents }) {
