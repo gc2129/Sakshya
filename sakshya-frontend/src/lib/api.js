@@ -190,6 +190,7 @@ export const api = {
   }),
 
   getEvidenceIncidents: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/incidents`),
+  getIncidentTraceability: (evidenceId, eventId) => request(`/evidence/${encodedId(evidenceId)}/traceability/${encodedId(eventId)}`),
   updateIncidentStatus: (evidenceId, incidentId, status, reason) => request(`/evidence/${encodedId(evidenceId)}/incidents/${encodedId(incidentId)}/status`, {
     method: 'POST',
     body: JSON.stringify({ status, reason }),
@@ -206,6 +207,15 @@ export const api = {
   getDocumentReport: (docId) => request(`/documents/${encodedId(docId)}/report`),
   getEvidenceReport: (evidenceId) => request(`/evidence/${encodedId(evidenceId)}/report`),
   downloadEvidenceReportPdf: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/report.pdf`),
+  downloadBsa63Certificate: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/bsa-63-certificate.pdf`, {
+    fallbackFilename: `${evidenceId}-bsa-63-certificate.pdf`,
+  }),
+  downloadAccessCopy: (evidenceId, purpose = 'Officer review') => requestBlob(`/evidence/${encodedId(evidenceId)}/access-copy?purpose=${encodeURIComponent(purpose)}`, {
+    fallbackFilename: `${evidenceId}-authorised-access-copy.pdf`,
+  }),
+  downloadAccessReceipt: (evidenceId, purpose = 'Officer review') => requestBlob(`/evidence/${encodedId(evidenceId)}/access-receipt.pdf?purpose=${encodeURIComponent(purpose)}`, {
+    fallbackFilename: `${evidenceId}-access-receipt.pdf`,
+  }),
   downloadCourtBundle: (evidenceId) => requestBlob(`/evidence/${encodedId(evidenceId)}/court-bundle`, {
     fallbackFilename: `${evidenceId}-court-bundle.pdf`,
   }),
@@ -218,6 +228,8 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  getOfflineSyncStatus: () => request('/offline-sync/status'),
+  getOfflineSyncQueue: () => request('/offline-sync/queue'),
   parseVoiceCommand: (text) => request('/voice/parse', {
     method: 'POST',
     body: JSON.stringify({ text }),

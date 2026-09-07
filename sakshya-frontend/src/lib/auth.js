@@ -15,11 +15,16 @@ export const rolePermissions = {
     action: true,
     transfer: true,
     offlineSync: true,
+    accessCopy: true,
+    accessReceipt: true,
   },
   [roles.forensicAnalyst]: {
     view: true,
     verify: true,
     report: true,
+    bsaCertificate: true,
+    accessCopy: true,
+    accessReceipt: true,
   },
   [roles.seniorAuthority]: {
     view: true,
@@ -31,11 +36,17 @@ export const rolePermissions = {
     incidentReplay: true,
     offlineSync: true,
     vault: true,
+    bsaCertificate: true,
+    traceability: true,
+    accessCopy: true,
+    accessReceipt: true,
   },
   [roles.courtViewer]: {
     view: true,
     verify: true,
     report: true,
+    accessCopy: true,
+    accessReceipt: true,
   },
   [roles.systemAdmin]: {
     view: true,
@@ -43,6 +54,9 @@ export const rolePermissions = {
     incidents: true,
     incidentReplay: true,
     vault: true,
+    traceability: true,
+    accessCopy: true,
+    accessReceipt: true,
   },
 };
 

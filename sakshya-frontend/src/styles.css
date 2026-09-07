@@ -2943,3 +2943,498 @@ h6 {
 .global-search input {
   font-family: 'Manrope', Inter, system-ui, sans-serif;
 }
+
+/* Compliance outputs and live reconciliation status. */
+.compliance-access {
+  margin: 14px 0;
+  padding: 17px;
+  border-top: 3px solid var(--police);
+}
+.compliance-access__intro {
+  max-width: 780px;
+  margin: 11px 0 0;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.compliance-access__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+.compliance-output {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--teal);
+  border-radius: 5px;
+  background: var(--panel-soft);
+}
+.compliance-output--restricted {
+  border-top-color: var(--border);
+  background: var(--canvas);
+}
+.compliance-output__head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: start;
+}
+.compliance-output__head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.compliance-output__head strong {
+  color: var(--text);
+  font-size: 11px;
+}
+.compliance-output__head div span {
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.compliance-output__icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--police);
+  border: 1px solid #cbdafa;
+  border-radius: 5px;
+  background: #edf3ff;
+}
+.compliance-output__icon--teal {
+  color: var(--teal);
+  border-color: #c6e4d7;
+  background: #edf8f2;
+}
+.compliance-output__head .status-badge {
+  margin-top: 1px;
+  white-space: nowrap;
+}
+.compliance-output__restriction {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.compliance-output__restriction svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--amber);
+}
+.compliance-purpose {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+.compliance-purpose > span {
+  color: var(--text-muted);
+  font: 9px 'IBM Plex Mono';
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.compliance-purpose input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  outline: 0;
+  color: var(--text);
+  background: var(--panel);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.compliance-purpose input:focus {
+  border-color: rgba(37, 99, 235, .55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .09);
+}
+.compliance-output__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: auto;
+}
+.compliance-output__actions .button {
+  flex: 1 1 170px;
+}
+.compliance-output > .button {
+  width: 100%;
+  margin-top: auto;
+}
+.compliance-access__error {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 11px;
+  border: 1px solid #edc8ca;
+  border-left: 3px solid var(--red);
+  border-radius: 5px;
+  color: var(--red);
+  background: #fff6f6;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.compliance-access__error svg {
+  flex: 0 0 auto;
+}
+.compliance-access__note {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.compliance-access__note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--police);
+}
+.theme-dark .compliance-output__icon {
+  border-color: #345579;
+  background: #172f4c;
+}
+.theme-dark .compliance-output__icon--teal {
+  border-color: #2a5d4d;
+  background: #15372f;
+}
+.theme-dark .compliance-access__error {
+  border-color: #683b42;
+  background: #3a202a;
+}
+
+.offline-sync__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.offline-sync__loading {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.offline-sync__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 15px;
+}
+.offline-sync__summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--canvas);
+}
+.offline-sync__summary strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 600 14px 'IBM Plex Mono';
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.offline-sync__summary small {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.offline-sync__queue {
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border-subtle);
+}
+.offline-sync__queue-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.offline-sync__queue-heading > span {
+  color: var(--text-muted);
+  font: 9px 'IBM Plex Mono';
+  text-align: right;
+}
+.offline-sync__queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--canvas);
+}
+.offline-sync__queue-item > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.offline-sync__queue-item strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 10px 'IBM Plex Mono';
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.offline-sync__queue-item span {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+.offline-sync__empty,
+.offline-sync__permission {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--canvas);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.offline-sync__empty svg {
+  flex: 0 0 auto;
+  color: var(--green);
+}
+.offline-sync__permission svg {
+  flex: 0 0 auto;
+  color: var(--amber);
+}
+
+/* Restricted traceability is deliberately explicit and warning-framed. */
+.restricted-traceability {
+  margin-top: 13px;
+  border: 1px solid #31536e;
+  border-radius: 5px;
+  background: #0d2236;
+}
+.restricted-traceability--expanded {
+  border-color: #5a7c96;
+}
+.restricted-traceability__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px 0;
+}
+.restricted-traceability__header > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.restricted-traceability__header .section-eyebrow {
+  color: #8eabc0;
+}
+.restricted-traceability__header strong {
+  color: #e5eef5;
+  font-size: 11px;
+}
+.traceability-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 29px;
+  padding: 0 8px;
+  border: 1px solid #55778f;
+  border-radius: 4px;
+  color: #d4e2ec;
+  background: transparent;
+  font-size: 9px;
+  white-space: nowrap;
+  transition: background .2s, border-color .2s;
+}
+.traceability-toggle:hover:not(:disabled) {
+  border-color: #8caabd;
+  background: #17344d;
+}
+.traceability-toggle:disabled {
+  color: #89a1b2;
+  border-color: #38566d;
+}
+.restricted-traceability__summary {
+  margin: 7px 11px 10px;
+  color: #91a9ba;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.restricted-traceability__body {
+  padding: 0 11px 11px;
+  border-top: 1px solid #294962;
+}
+.traceability-locked,
+.traceability-error,
+.traceability-authorised,
+.traceability-safety {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.traceability-locked {
+  color: #b8cad6;
+  border: 1px solid #3a5c72;
+  background: #132e45;
+}
+.traceability-locked svg {
+  flex: 0 0 auto;
+  color: #e0b24a;
+}
+.traceability-locked--review {
+  border-color: #6b5524;
+  background: #3a2f20;
+}
+.traceability-locked > div {
+  display: grid;
+  gap: 3px;
+}
+.traceability-locked strong {
+  color: #e4eef5;
+  font-size: 10px;
+}
+.traceability-locked span {
+  color: #9fb4c2;
+}
+.traceability-error {
+  align-items: center;
+  color: #f0b1ac;
+  border: 1px solid #74464e;
+  background: #3a202a;
+}
+.traceability-error svg {
+  flex: 0 0 auto;
+}
+.traceability-error .text-button {
+  margin-left: auto;
+  color: #f4c4bf;
+}
+.traceability-authorised {
+  align-items: center;
+  color: #b9e4cc;
+  border: 1px solid #2d6654;
+  background: #12382f;
+}
+.traceability-authorised svg {
+  flex: 0 0 auto;
+}
+.traceability-authorised span {
+  margin-left: auto;
+  color: #82b49f;
+}
+.traceability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+.traceability-value {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #294962;
+  border-radius: 4px;
+  background: #102940;
+}
+.traceability-value span {
+  color: #7895aa;
+  font-size: 9px;
+}
+.traceability-value strong {
+  overflow-wrap: anywhere;
+  color: #dce8ef;
+  font-size: 10px;
+  font-weight: 500;
+}
+.traceability-value strong.mono {
+  color: #b2cee0;
+  font-size: 9px;
+}
+.traceability-safety {
+  color: #b6c7d2;
+  border: 1px solid #496276;
+  background: #142f45;
+}
+.traceability-safety svg {
+  flex: 0 0 auto;
+  color: #e0b24a;
+}
+
+@media (max-width: 900px) {
+  .compliance-access__grid {
+    grid-template-columns: 1fr;
+  }
+  .offline-sync__summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .compliance-access,
+  .offline-sync {
+    padding: 14px;
+  }
+  .compliance-output__head {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+  .compliance-output__head .status-badge {
+    grid-column: 2;
+    width: max-content;
+  }
+  .offline-sync__summary,
+  .traceability-grid {
+    grid-template-columns: 1fr;
+  }
+  .offline-sync__queue-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .offline-sync__queue-heading > span {
+    text-align: left;
+  }
+  .offline-sync__queue-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .restricted-traceability__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .traceability-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+  .traceability-authorised {
+    flex-wrap: wrap;
+  }
+  .traceability-authorised span {
+    width: 100%;
+    margin-left: 21px;
+  }
+}
