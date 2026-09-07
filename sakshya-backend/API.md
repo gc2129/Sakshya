@@ -67,6 +67,8 @@ Source provenance is an honest assessment, not a claim to detect every pre-uploa
 
 Every invalid OTP, denied protected action, verification failure and other recorded sensitive action writes a SQLite `network_events` row. Evidence incidents now expose stable `sourceNetwork`, `deviceContext`, and `locationContext` fields. The full IP and User-Agent are available only to System Admin and Senior Authority; all other roles receive redacted values. `127.0.0.1` and `::1` are valid local-test values. Browser location is included only when the client sends `locationConsent: true`; otherwise `locationContext` is always `Not voluntarily shared`.
 
+New tamper simulations create an `OPEN`, `HIGH` `DEMO_TAMPER_SIMULATION` incident with a fresh timestamp and the same traceability fields, so it appears in anomaly/list/detail responses. Older persisted incidents that predate trace capture return the explicit value **`Historical record — traceability unavailable`** for all three fields together with `traceability.available: false`; this distinguishes a historical gap from a backend response failure.
+
 Set `SAKSHYA_TRUST_PROXY=true` only when the backend is behind one known, controlled reverse proxy. By default Express ignores forwarded client IP headers, preventing spoofed `X-Forwarded-For` values. Network information is **“Approximate network-origin context for lawful authorised investigation”**; it does not infer a person's identity, GPS location, city, or an attacker name.
 
 `GET /api/evidence/:id/report` and `GET /api/documents/:id/report` now include:
