@@ -127,7 +127,6 @@ export function Navbar({ theme, onThemeChange, highContrast, onContrastChange, a
           <Search size={16} />
           <input aria-label="Search the evidence register" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search evidence, cases, officers…" />
           {searchQuery && <button className="global-search__clear" type="button" aria-label="Clear search" onClick={() => setSearchQuery('')}><X size={13} /></button>}
-          <span className="search-shortcut">⌘ K</span>
           {searchQuery.trim().length > 1 && <div className="search-results" role="listbox" aria-label="Evidence search results">
             {searchResults.length ? searchResults.map((document) => <button className="search-result" type="button" role="option" key={document.docId} onClick={() => openRecord(document.docId)}><span className="search-result__icon"><FileCheck2 size={14} /></span><span><strong>{document.docId}</strong><small>{document.caseId} · {document.name}</small></span><span className={cn('search-result__status', document.status === 'compromised' && 'search-result__status--bad')}>{document.status}</span></button>) : <div className="search-results__empty"><Search size={14} /><span>No live record matches this search.</span></div>}
           </div>}
